@@ -1,10 +1,15 @@
 package com.blepulse.android.ui.fota
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
@@ -49,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,6 +82,7 @@ fun FotaScreen(
     repository: BleRepository,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val fotaManager = remember { FotaManager() }
     val progress by fotaManager.progress.collectAsState()
     val logs by fotaManager.logs.collectAsState()
@@ -85,8 +93,26 @@ fun FotaScreen(
     var chunkSize by remember { mutableFloatStateOf(244f) }
     var interChunkDelayMs by remember { mutableFloatStateOf(5f) }
 
-    // Synthesize sample firmware binary for testing
-    val currentFirmwareBytes = remember(selectedProtocol, selectedPresetSizeKb) {
+    var loadedCustomFileBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var loadedCustomFileName by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "custom_firmware.bin"
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    loadedCustomFileBytes = bytes
+                    loadedCustomFileName = fileName
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Synthesize sample firmware binary for testing fallback
+    val generatedTestBytes = remember(selectedProtocol, selectedPresetSizeKb) {
         val totalBytes = selectedPresetSizeKb * 1024
         val bytes = ByteArray(totalBytes)
         when (selectedProtocol) {
@@ -115,8 +141,11 @@ fun FotaScreen(
         bytes
     }
 
-    val firmwareMeta = remember(currentFirmwareBytes) {
-        fotaManager.inspectFirmware(currentFirmwareBytes, "${selectedProtocol.name.lowercase()}_v1.4.bin")
+    val currentFirmwareBytes = loadedCustomFileBytes ?: generatedTestBytes
+    val currentFirmwareName = loadedCustomFileName ?: "${selectedProtocol.name.lowercase()}_v1.4.bin"
+
+    val firmwareMeta = remember(currentFirmwareBytes, currentFirmwareName) {
+        fotaManager.inspectFirmware(currentFirmwareBytes, currentFirmwareName)
     }
 
     LaunchedEffect(logs.size) {
@@ -251,26 +280,63 @@ fun FotaScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                // Sample image size selector
+                Spacer(modifier = Modifier.height(10.dp))
+                // File Picker / Preset Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Sample Size:", fontSize = 10.sp, color = TextMuted)
-                    listOf(16, 32, 64, 128).forEach { kb ->
-                        FilterChip(
-                            selected = selectedPresetSizeKb == kb,
-                            onClick = { selectedPresetSizeKb = kb },
-                            label = { Text("${kb}KB", fontSize = 10.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = BleViolet.copy(alpha = 0.25f),
-                                selectedLabelColor = BleViolet,
-                                containerColor = DarkCard,
-                                labelColor = TextMuted
-                            )
+                    Button(
+                        onClick = { filePickerLauncher.launch("*/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkCard),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = BleCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            if (loadedCustomFileBytes != null) "Change File (${loadedCustomFileName?.take(16)}...)" else "Pick Firmware (.bin / .zip)",
+                            fontSize = 11.sp,
+                            color = BleCyan
                         )
+                    }
+
+                    if (loadedCustomFileBytes != null) {
+                        Text(
+                            text = "Reset Preset",
+                            fontSize = 10.sp,
+                            color = BleOrange,
+                            modifier = Modifier.clickable {
+                                loadedCustomFileBytes = null
+                                loadedCustomFileName = null
+                            }
+                        )
+                    }
+                }
+
+                if (loadedCustomFileBytes == null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Sample image size selector
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Sample Preset:", fontSize = 10.sp, color = TextMuted)
+                        listOf(16, 32, 64, 128).forEach { kb ->
+                            FilterChip(
+                                selected = selectedPresetSizeKb == kb,
+                                onClick = { selectedPresetSizeKb = kb },
+                                label = { Text("${kb}KB", fontSize = 10.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = BleViolet.copy(alpha = 0.25f),
+                                    selectedLabelColor = BleViolet,
+                                    containerColor = DarkCard,
+                                    labelColor = TextMuted
+                                )
+                            )
+                        }
                     }
                 }
             }

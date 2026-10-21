@@ -1,5 +1,6 @@
 package com.blepulse.android.ui.scanner
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,17 +49,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.FileProvider
 import com.blepulse.android.core.ble.BleRepository
 import com.blepulse.android.core.ble.HardwareMode
 import com.blepulse.android.core.ble.ScanFilterConfig
 import com.blepulse.android.core.model.BleDevice
 import com.blepulse.android.core.model.EddystoneData
 import com.blepulse.android.core.pcap.PcapExporter
+import java.io.File
 import com.blepulse.android.ui.common.HexDumpViewer
 import com.blepulse.android.ui.common.SignalIndicator
 import com.blepulse.android.ui.common.SparklineView
@@ -81,6 +85,7 @@ fun ScannerScreen(
     repository: BleRepository,
     onNavigateToExplorer: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val isScanning by repository.isScanning.collectAsState()
     val hardwareMode by repository.hardwareMode.collectAsState()
     val devices by repository.discoveredDevices.collectAsState()
@@ -161,7 +166,26 @@ fun ScannerScreen(
                         IconButton(
                             onClick = {
                                 val pcapBytes = PcapExporter.exportAdvertisements(filteredDevices)
-                                pcapNotice = "Exported ${filteredDevices.size} packets (${pcapBytes.size} bytes) in Libpcap 2.4 format"
+                                try {
+                                    val dir = File(context.cacheDir, "captures").apply { mkdirs() }
+                                    val file = File(dir, "blepulse_scan_${System.currentTimeMillis()}.pcap")
+                                    file.writeBytes(pcapBytes)
+
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        file
+                                    )
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/vnd.tcpdump.pcap"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Share BLE PCAP Capture"))
+                                    pcapNotice = "Saved ${filteredDevices.size} packets (${pcapBytes.size} B) to ${file.name} (Share Sheet opened)"
+                                } catch (_: Exception) {
+                                    pcapNotice = "Exported ${filteredDevices.size} packets (${pcapBytes.size} bytes) in Libpcap 2.4 format"
+                                }
                             }
                         ) {
                             Icon(Icons.Default.Download, contentDescription = "Export PCAP", tint = BleCyan)

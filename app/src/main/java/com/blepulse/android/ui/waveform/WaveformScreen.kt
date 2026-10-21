@@ -1,5 +1,6 @@
 package com.blepulse.android.ui.waveform
 
+import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -48,6 +50,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -83,6 +88,7 @@ fun WaveformScreen(
     repository: BleRepository,
     targetCharUuid: UUID? = null
 ) {
+    val context = LocalContext.current
     val waveformEngine = remember { WaveformEngine() }
     val scopeState by waveformEngine.state.collectAsState()
     val activeConn by repository.activeConnection.collectAsState()
@@ -153,6 +159,32 @@ fun WaveformScreen(
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val csv = waveformEngine.exportToCsv()
+                                try {
+                                    val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+                                    val file = File(dir, "blepulse_waveform_${System.currentTimeMillis()}.csv")
+                                    file.writeText(csv)
+
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        file
+                                    )
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/csv"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Export Telemetry CSV"))
+                                } catch (_: Exception) {}
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = "Export CSV", tint = BleCyan)
                         }
                     }
                 }
