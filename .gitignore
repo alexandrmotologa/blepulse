@@ -1,0 +1,22 @@
+# Gradle and build files
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+
+# Local configuration
+local.properties
+.idea/
+*.iml
+.DS_Store
+*.hprof
+
+# Kotlin / IDE
+.kotlin/
+captures/
+.externalNativeBuild/
+
+# Python / Doc generator artifacts
+__pycache__/
+*.pyc
