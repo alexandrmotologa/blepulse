@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
@@ -57,6 +58,7 @@ import com.blepulse.android.core.ble.HardwareMode
 import com.blepulse.android.core.ble.ScanFilterConfig
 import com.blepulse.android.core.model.BleDevice
 import com.blepulse.android.core.model.EddystoneData
+import com.blepulse.android.core.pcap.PcapExporter
 import com.blepulse.android.ui.common.HexDumpViewer
 import com.blepulse.android.ui.common.SignalIndicator
 import com.blepulse.android.ui.common.SparklineView
@@ -86,6 +88,7 @@ fun ScannerScreen(
     var showFilterDialog by remember { mutableStateOf(false) }
     var filterConfig by remember { mutableStateOf(ScanFilterConfig()) }
     var searchQuery by remember { mutableStateOf("") }
+    var pcapNotice by remember { mutableStateOf<String?>(null) }
 
     val filteredDevices = remember(devices, searchQuery, filterConfig) {
         devices.filter { dev ->
@@ -155,6 +158,15 @@ fun ScannerScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                val pcapBytes = PcapExporter.exportAdvertisements(filteredDevices)
+                                pcapNotice = "Exported ${filteredDevices.size} packets (${pcapBytes.size} bytes) in Libpcap 2.4 format"
+                            }
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = "Export PCAP", tint = BleCyan)
+                        }
+
                         IconButton(onClick = { showFilterDialog = true }) {
                             Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = BleCyan)
                         }
@@ -196,6 +208,32 @@ fun ScannerScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
+
+                if (pcapNotice != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(BleCyan.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                            .border(1.dp, BleCyan.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = pcapNotice!!,
+                            fontSize = 11.sp,
+                            color = BleCyan
+                        )
+                        Text(
+                            text = "Dismiss",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            modifier = Modifier.clickable { pcapNotice = null }
+                        )
+                    }
+                }
             }
         }
 

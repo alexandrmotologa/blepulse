@@ -19,6 +19,13 @@ val SignalGreen = Color(0xFF00E676)
 val WarningAmber = Color(0xFFFFB300)
 val CriticalRed = Color(0xFFFF1744)
 
+// Semantic aliases
+val BleGreen = SignalGreen
+val BleOrange = WarningAmber
+val BleRed = CriticalRed
+val BleViolet = ElectricViolet
+val DarkCard = DarkSurfaceElevated
+
 val TextPrimary = Color(0xFFF8FAFC)
 val TextSecondary = Color(0xFF94A3B8)
 val TextMuted = Color(0xFF64748B)

@@ -21,13 +21,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -38,12 +41,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -52,12 +56,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blepulse.android.core.ble.BleRepository
+import com.blepulse.android.core.waveform.FftResult
+import com.blepulse.android.core.waveform.FftWindowType
 import com.blepulse.android.core.waveform.ScopeChannel
 import com.blepulse.android.core.waveform.ScopeStreamFormat
+import com.blepulse.android.core.waveform.ScopeViewMode
 import com.blepulse.android.core.waveform.WaveformEngine
-import com.blepulse.android.ui.common.StatusBadge
 import com.blepulse.android.ui.theme.BleCyan
-import com.blepulse.android.ui.theme.CriticalRed
+import com.blepulse.android.ui.theme.BleGreen
+import com.blepulse.android.ui.theme.BleOrange
+import com.blepulse.android.ui.theme.BleViolet
 import com.blepulse.android.ui.theme.DarkBorder
 import com.blepulse.android.ui.theme.DarkSlateBg
 import com.blepulse.android.ui.theme.DarkSurface
@@ -115,7 +123,7 @@ fun WaveformScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Live Waveform Oscilloscope",
+                            text = if (scopeState.viewMode == ScopeViewMode.TIME_DOMAIN) "Live Waveform Oscilloscope" else "Real-Time FFT Spectrum",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
@@ -151,6 +159,42 @@ fun WaveformScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Mode switch pills (Oscilloscope vs FFT Spectrum)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = scopeState.viewMode == ScopeViewMode.TIME_DOMAIN,
+                        onClick = { waveformEngine.setViewMode(ScopeViewMode.TIME_DOMAIN) },
+                        leadingIcon = { Icon(Icons.Default.ShowChart, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        label = { Text("Oscilloscope", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BleCyan.copy(alpha = 0.2f),
+                            selectedLabelColor = BleCyan,
+                            containerColor = DarkSurfaceElevated,
+                            labelColor = TextMuted
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    FilterChip(
+                        selected = scopeState.viewMode == ScopeViewMode.FFT_SPECTRUM,
+                        onClick = { waveformEngine.setViewMode(ScopeViewMode.FFT_SPECTRUM) },
+                        leadingIcon = { Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        label = { Text("FFT Spectrum", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BleViolet.copy(alpha = 0.2f),
+                            selectedLabelColor = BleViolet,
+                            containerColor = DarkSurfaceElevated,
+                            labelColor = TextMuted
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -182,24 +226,48 @@ fun WaveformScreen(
                         }
                     }
 
-                    // Window duration chips
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(5, 10, 30).forEach { sec ->
-                            val isSelected = scopeState.timeWindowSeconds == sec
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isSelected) BleCyan else DarkSurfaceElevated)
-                                    .border(1.dp, if (isSelected) BleCyan else DarkBorder, RoundedCornerShape(4.dp))
-                                    .clickable { waveformEngine.setTimeWindow(sec) }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "${sec}s",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) Color.Black else TextSecondary
-                                )
+                    if (scopeState.viewMode == ScopeViewMode.TIME_DOMAIN) {
+                        // Window duration chips
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(5, 10, 30).forEach { sec ->
+                                val isSelected = scopeState.timeWindowSeconds == sec
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(if (isSelected) BleCyan else DarkSurfaceElevated)
+                                        .border(1.dp, if (isSelected) BleCyan else DarkBorder, RoundedCornerShape(4.dp))
+                                        .clickable { waveformEngine.setTimeWindow(sec) }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "${sec}s",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) Color.Black else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Window Type chips for FFT
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(FftWindowType.HANNING, FftWindowType.HAMMING, FftWindowType.RECTANGULAR).forEach { win ->
+                                val isSelected = scopeState.fftWindowType == win
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(if (isSelected) BleViolet else DarkSurfaceElevated)
+                                        .border(1.dp, if (isSelected) BleViolet else DarkBorder, RoundedCornerShape(4.dp))
+                                        .clickable { waveformEngine.setFftWindowType(win) }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = win.label.take(4),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) Color.White else TextSecondary
+                                    )
+                                }
                             }
                         }
                     }
@@ -207,7 +275,7 @@ fun WaveformScreen(
             }
         }
 
-        // Oscilloscope Canvas Viewport
+        // Canvas Viewport (Oscilloscope or FFT Spectrum)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -217,10 +285,17 @@ fun WaveformScreen(
                 .background(Color(0xFF04060A))
                 .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
         ) {
-            OscilloscopeCanvas(
-                channels = scopeState.channels,
-                modifier = Modifier.fillMaxSize()
-            )
+            if (scopeState.viewMode == ScopeViewMode.TIME_DOMAIN) {
+                OscilloscopeCanvas(
+                    channels = scopeState.channels,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                FftSpectrumCanvas(
+                    fftResult = scopeState.fftResult,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Telemetry Channel Cards
@@ -306,6 +381,89 @@ fun OscilloscopeCanvas(
                     path = path,
                     color = Color(ch.colorArgb),
                     style = Stroke(width = 2.5.dp.toPx())
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun FftSpectrumCanvas(
+    fftResult: FftResult?,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        // 1. Draw Spectrum Grid
+        val gridLinesX = 8
+        val gridLinesY = 5
+
+        for (i in 0..gridLinesX) {
+            val x = (w / gridLinesX) * i
+            drawLine(
+                color = Color(0xFF162032),
+                start = Offset(x, 0f),
+                end = Offset(x, h),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+
+        for (i in 0..gridLinesY) {
+            val y = (h / gridLinesY) * i
+            drawLine(
+                color = Color(0xFF162032),
+                start = Offset(0f, y),
+                end = Offset(w, y),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+
+        if (fftResult == null || fftResult.bins.isEmpty()) return@Canvas
+
+        val bins = fftResult.bins
+        val barWidth = (w / bins.size).coerceAtLeast(2f)
+
+        // 2. Draw Spectrum Gradient Bars
+        bins.forEachIndexed { index, bin ->
+            val barHeight = bin.normalizedMagnitude * (h - 30f)
+            val x = index * barWidth
+            val y = h - barHeight
+
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        BleViolet,
+                        BleCyan,
+                        Color(0xFF0D47A1)
+                    ),
+                    startY = y,
+                    endY = h
+                ),
+                topLeft = Offset(x, y),
+                size = Size(barWidth - 1f, barHeight)
+            )
+        }
+
+        // 3. Highlight Peak Frequency
+        if (fftResult.peakFrequencyHz > 0f) {
+            val peakBin = bins.maxByOrNull { it.magnitude }
+            if (peakBin != null) {
+                val peakX = peakBin.binIndex * barWidth + (barWidth / 2f)
+                val peakY = h - (peakBin.normalizedMagnitude * (h - 30f))
+
+                drawCircle(
+                    color = BleGreen,
+                    radius = 5.dp.toPx(),
+                    center = Offset(peakX, peakY)
+                )
+
+                drawLine(
+                    color = BleGreen.copy(alpha = 0.6f),
+                    start = Offset(peakX, 0f),
+                    end = Offset(peakX, h),
+                    strokeWidth = 1.5.dp.toPx()
                 )
             }
         }

@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.SettingsInputComponent
@@ -35,10 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.blepulse.android.core.ble.BleRepository
 import com.blepulse.android.ui.explorer.GattExplorerScreen
-import com.blepulse.android.ui.fuzzer.FuzzerScreen
 import com.blepulse.android.ui.scanner.ScannerScreen
 import com.blepulse.android.ui.simulator.SimulatorScreen
 import com.blepulse.android.ui.theme.BleCyan
@@ -46,7 +44,8 @@ import com.blepulse.android.ui.theme.BlePulseTheme
 import com.blepulse.android.ui.theme.DarkSlateBg
 import com.blepulse.android.ui.theme.DarkSurface
 import com.blepulse.android.ui.theme.TextMuted
-import com.blepulse.android.ui.theme.TextPrimary
+import com.blepulse.android.ui.tools.ActiveTool
+import com.blepulse.android.ui.tools.ToolsScreen
 import com.blepulse.android.ui.waveform.WaveformScreen
 import java.util.UUID
 
@@ -54,7 +53,7 @@ enum class AppTab(val label: String, val icon: ImageVector) {
     SCANNER("Scanner", Icons.Default.Radar),
     EXPLORER("Explorer", Icons.Default.SettingsInputComponent),
     WAVEFORM("Scope", Icons.Default.ShowChart),
-    FUZZER("Fuzzer", Icons.Default.BugReport),
+    TOOLS("Tools", Icons.Default.Build),
     SIMULATOR("Simulator", Icons.Default.Sensors)
 }
 
@@ -80,6 +79,8 @@ fun MainContent(repository: BleRepository) {
     var routedScopeCharUuid by remember { mutableStateOf<UUID?>(null) }
     var routedFuzzerServiceUuid by remember { mutableStateOf<UUID?>(null) }
     var routedFuzzerCharUuid by remember { mutableStateOf<UUID?>(null) }
+    var routedTool by remember { mutableStateOf(ActiveTool.TERMINAL) }
+    var targetDeviceAddress by remember { mutableStateOf<String?>(null) }
 
     // Runtime Permission Request for Android 12+ (API 31+)
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -144,6 +145,7 @@ fun MainContent(repository: BleRepository) {
                         repository = repository,
                         onNavigateToExplorer = { address ->
                             repository.connect(address)
+                            targetDeviceAddress = address
                             selectedTab = AppTab.EXPLORER.ordinal
                         }
                     )
@@ -158,7 +160,8 @@ fun MainContent(repository: BleRepository) {
                         onRouteToFuzzer = { serviceUuid, charUuid ->
                             routedFuzzerServiceUuid = serviceUuid
                             routedFuzzerCharUuid = charUuid
-                            selectedTab = AppTab.FUZZER.ordinal
+                            routedTool = ActiveTool.FUZZER
+                            selectedTab = AppTab.TOOLS.ordinal
                         }
                     )
                 }
@@ -168,11 +171,13 @@ fun MainContent(repository: BleRepository) {
                         targetCharUuid = routedScopeCharUuid
                     )
                 }
-                AppTab.FUZZER -> {
-                    FuzzerScreen(
+                AppTab.TOOLS -> {
+                    ToolsScreen(
                         repository = repository,
-                        preselectedServiceUuid = routedFuzzerServiceUuid,
-                        preselectedCharUuid = routedFuzzerCharUuid
+                        initialTool = routedTool,
+                        fuzzerServiceUuid = routedFuzzerServiceUuid,
+                        fuzzerCharUuid = routedFuzzerCharUuid,
+                        targetDeviceAddress = targetDeviceAddress
                     )
                 }
                 AppTab.SIMULATOR -> {

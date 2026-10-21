@@ -67,14 +67,18 @@ def draw_device_mockup(canvas_w, canvas_h, title, subtitle, render_content_fn):
     draw.rectangle([(px, nav_y), (px + phone_w, py + phone_h)], fill=(17, 24, 39))
     draw.line([(px, nav_y), (px + phone_w, nav_y)], fill=(51, 65, 85), width=1)
 
-    tabs = ["Scanner", "Explorer", "Scope", "Fuzzer", "Simulator"]
+    tabs = ["Scanner", "Explorer", "Scope", "Tools", "Simulator"]
     tab_w = phone_w // len(tabs)
     font_tab = get_font(13, bold=True)
     for i, tab in enumerate(tabs):
         tx = px + i * tab_w + (tab_w - 40) // 2
-        col = (0, 229, 255) if i == 0 and "Scanner" in title or i == 1 and "Explorer" in title or i == 2 and "Oscilloscope" in title or i == 3 and "Fuzzer" in title or i == 4 and "Simulator" in title else (100, 116, 139)
+        is_sel = (i == 0 and "Scanner" in title) or \
+                 (i == 1 and "Explorer" in title) or \
+                 (i == 2 and ("Oscilloscope" in title or "FFT" in title)) or \
+                 (i == 3 and any(w in title for w in ["Terminal", "Geiger", "Audit", "Macro", "FOTA", "Fuzzer"])) or \
+                 (i == 4 and "Simulator" in title)
+        col = (0, 229, 255) if is_sel else (100, 116, 139)
         draw.text((tx, nav_y + 36), tab, font=font_tab, fill=col)
-        # Dot indicator
         draw.ellipse([(tx + 16, nav_y + 16), (tx + 24, nav_y + 24)], fill=col)
 
     return img
@@ -98,344 +102,590 @@ def render_scanner(draw, rect, px, py, pw, ph):
     draw.rounded_rectangle([(x2 - 110, cy), (x2, cy + 34)], radius=6, fill=(0, 229, 255))
     draw.text((x2 - 86, cy + 8), "SCANNING", font=font_badge, fill=(0, 0, 0))
 
-    # Devices list
-    devices = [
+    # Device list items
+    items = [
         {
-            "name": "ESP32-S3 Waveform Node",
-            "mac": "78:21:84:45:9A:10",
-            "rssi": "-52 dBm",
-            "dist": "0.7m",
-            "badges": [("Espressif", (0, 229, 255)), ("NUS UART", (124, 77, 255)), ("LE 2M", (100, 116, 139))],
-            "expanded": True
+            "name": "Nordic_HRM_Sensor", "addr": "E0:4E:01:23:45:67", "rssi": -48, "dist": "0.6m",
+            "badges": [("Nordic Semi", (0, 229, 255)), ("Heart Rate 0x180D", (0, 230, 118)), ("LE 2M", (100, 116, 139))]
         },
         {
-            "name": "Polar H10 3BA244",
-            "mac": "C8:FD:19:3B:A2:44",
-            "rssi": "-61 dBm",
-            "dist": "1.1m",
-            "badges": [("Heart Rate", (255, 23, 68)), ("Battery", (0, 230, 118))],
-            "expanded": False
+            "name": "ESP32-S3 Environment Station", "addr": "24:0A:C4:88:99:AA", "rssi": -62, "dist": "1.8m",
+            "badges": [("Espressif", (0, 229, 255)), ("Env Sensing 0x181A", (0, 230, 118)), ("Connectable", (0, 230, 118))]
         },
         {
-            "name": "iBeacon Asset Tag",
-            "mac": "E2:C5:6D:B5:D4:F1",
-            "rssi": "-66 dBm",
-            "dist": "1.4m",
-            "badges": [("iBeacon", (255, 179, 0)), ("Apple", (0, 229, 255))],
-            "expanded": False
+            "name": "iBeacon Proximity Beacon", "addr": "58:B0:35:F1:C2:10", "rssi": -71, "dist": "3.4m",
+            "badges": [("iBeacon", (255, 179, 0)), ("Major: 100", (148, 163, 184)), ("Minor: 204", (148, 163, 184))]
         },
         {
-            "name": "RuuviTag CA58",
-            "mac": "D4:36:39:CA:58:12",
-            "rssi": "-74 dBm",
-            "dist": "2.6m",
-            "badges": [("Weather Sensor", (0, 230, 118)), ("Ruuvi", (100, 116, 139))],
-            "expanded": False
+            "name": "Eddystone-URL Broadcaster", "addr": "AC:23:3F:12:44:88", "rssi": -79, "dist": "5.1m",
+            "badges": [("Eddystone", (124, 77, 255)), ("URL Frame", (0, 229, 255)), ("TLM Telemetry", (0, 230, 118))]
         },
         {
-            "name": "IoT Fuzz Target",
-            "mac": "DE:AD:BE:EF:00:01",
-            "rssi": "-48 dBm",
-            "dist": "0.5m",
-            "badges": [("Custom Service", (124, 77, 255)), ("Writable", (0, 229, 255))],
-            "expanded": False
+            "name": "Smart Door Lock v2", "addr": "B4:52:7E:90:11:33", "rssi": -85, "dist": "7.8m",
+            "badges": [("TI CC2640", (0, 229, 255)), ("Secured GATT", (255, 23, 68)), ("Encrypted", (255, 179, 0))]
         }
     ]
 
-    dy = cy + 46
-    for dev in devices:
-        card_h = 240 if dev["expanded"] else 96
-        draw.rounded_rectangle([(x1, dy), (x2, dy + card_h)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255) if dev["expanded"] else (51, 65, 85))
+    iy = cy + 44
+    for it in items:
+        # Card background
+        draw.rounded_rectangle([(x1, iy), (x2, iy + 130)], radius=10, fill=(17, 24, 39), outline=(51, 65, 85))
 
-        draw.text((x1 + 16, dy + 14), dev["name"], font=font_bold, fill=(248, 250, 252))
-        draw.text((x1 + 16, dy + 36), dev["mac"], font=font_mono, fill=(148, 163, 184))
+        # Title & MAC
+        draw.text((x1 + 16, iy + 14), it["name"], font=font_bold, fill=(248, 250, 252))
+        draw.text((x1 + 16, iy + 36), it["addr"], font=font_mono, fill=(148, 163, 184))
 
-        # RSSI & Connect
-        draw.text((x2 - 190, dy + 16), dev["rssi"], font=font_mono, fill=(0, 230, 118))
-        draw.rounded_rectangle([(x2 - 100, dy + 12), (x2 - 16, dy + 44)], radius=6, fill=(0, 229, 255))
-        draw.text((x2 - 82, dy + 19), "CONNECT", font=font_badge, fill=(0, 0, 0))
+        # RSSI & Proximity
+        draw.text((x2 - 100, iy + 14), f"{it['rssi']} dBm", font=font_mono, fill=(0, 230, 118) if it["rssi"] > -60 else (0, 229, 255))
+        draw.text((x2 - 100, iy + 36), it["dist"], font=font_mono, fill=(100, 116, 139))
 
-        # Badges
+        # Mini sparkline
+        sp_x = x2 - 190
+        sp_y = iy + 24
+        draw.line([(sp_x, sp_y + 10), (sp_x + 15, sp_y + 5), (sp_x + 30, sp_y + 12), (sp_x + 45, sp_y + 2), (sp_x + 60, sp_y + 8)], fill=(0, 229, 255), width=2)
+
+        # Badges row
         bx = x1 + 16
-        for tag, col in dev["badges"]:
-            tw = len(tag) * 8 + 14
-            draw.rounded_rectangle([(bx, dy + 62), (bx + tw, dy + 82)], radius=4, fill=(col[0]//6, col[1]//6, col[2]//6), outline=col)
-            draw.text((bx + 6, dy + 66), tag, font=font_badge, fill=col)
-            bx += tw + 8
+        for label, col in it["badges"]:
+            b_w = len(label) * 8 + 14
+            draw.rounded_rectangle([(bx, iy + 66), (bx + b_w, iy + 90)], radius=4, fill=(10, 25, 40), outline=col)
+            draw.text((bx + 7, iy + 71), label, font=font_badge, fill=col)
+            bx += b_w + 8
 
-        if dev["expanded"]:
-            ey = dy + 92
-            draw.line([(x1 + 16, ey), (x2 - 16, ey)], fill=(51, 65, 85), width=1)
-            draw.text((x1 + 16, ey + 8), "Primary PHY: LE 1M | Secondary PHY: LE 2M | Distance: ~0.7m", font=font_mono, fill=(148, 163, 184))
-            draw.text((x1 + 16, ey + 26), "Service UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E (NUS)", font=font_mono, fill=(124, 77, 255))
-            draw.text((x1 + 16, ey + 44), "Raw AD Hex Payload (31 bytes):", font=font_mono, fill=(248, 250, 252))
+        # Connect button
+        draw.rounded_rectangle([(x2 - 110, iy + 84), (x2 - 14, iy + 118)], radius=6, fill=(0, 229, 255))
+        draw.text((x2 - 96, iy + 94), "CONNECT", font=font_badge, fill=(0, 0, 0))
 
-            # Hex dump preview
-            draw.rounded_rectangle([(x1 + 16, ey + 64), (x2 - 16, ey + 134)], radius=6, fill=(9, 13, 22), outline=(51, 65, 85))
-            draw.text((x1 + 24, ey + 72), "0000: 02 01 06 11 07 9E CA DC 24 0E E5 A9 E0 93 F3 A3  |  ................", font=font_mono, fill=(0, 229, 255))
-            draw.text((x1 + 24, ey + 90), "0010: B5 01 00 40 6E 07 FF E5 02 45 53 50 33 32 01     |  ...@n...ESP32.", font=font_mono, fill=(0, 229, 255))
-
-        dy += card_h + 10
+        iy += 142
 
 def render_explorer(draw, rect, px, py, pw, ph):
     font_bold = get_font(15, bold=True)
-    font_sub = get_font(13)
     font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
     font_badge = get_font(11, bold=True, mono=True)
 
     x1, y1, x2, y2 = rect
 
-    # Header Card
-    draw.rounded_rectangle([(x1, y1), (x2, y1 + 94)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, y1 + 14), "ESP32-S3 Waveform Node", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, y1 + 36), "78:21:84:45:9A:10", font=font_mono, fill=(148, 163, 184))
-
-    # Connection params
-    draw.rounded_rectangle([(x1 + 16, y1 + 60), (x1 + 120, y1 + 82)], radius=4, fill=(0, 50, 20), outline=(0, 230, 118))
-    draw.text((x1 + 24, y1 + 64), "CONNECTED", font=font_badge, fill=(0, 230, 118))
-
-    draw.rounded_rectangle([(x1 + 130, y1 + 60), (x1 + 260, y1 + 82)], radius=4, fill=(9, 13, 22), outline=(0, 229, 255))
-    draw.text((x1 + 138, y1 + 64), "MTU: 517 BYTES", font=font_badge, fill=(0, 229, 255))
-
-    draw.rounded_rectangle([(x1 + 270, y1 + 60), (x1 + 380, y1 + 82)], radius=4, fill=(9, 13, 22), outline=(124, 77, 255))
-    draw.text((x1 + 278, y1 + 64), "PHY: LE 2M", font=font_badge, fill=(124, 77, 255))
-
-    draw.rounded_rectangle([(x2 - 120, y1 + 14), (x2 - 16, y1 + 44)], radius=6, fill=(255, 23, 68))
-    draw.text((x2 - 108, y1 + 20), "DISCONNECT", font=font_badge, fill=(255, 255, 255))
+    # Device header banner
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 90)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 14), "Nordic_HRM_Sensor", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Connected (MTU: 247 | PHY: 2M High-Speed | Latency: 12ms)", font=font_sub, fill=(0, 230, 118))
+    draw.text((x1 + 16, y1 + 60), "MAC: E0:4E:01:23:45:67 | Battery: 94% (3.95V)", font=font_mono, fill=(148, 163, 184))
 
     # Services
-    sy = y1 + 106
-    draw.text((x1, sy), "Discovered GATT Services (2):", font=font_bold, fill=(248, 250, 252))
-    sy += 26
+    services = [
+        {
+            "name": "Heart Rate Service (0x180D)",
+            "uuid": "0000180d-0000-1000-8000-00805f9b34fb",
+            "chars": [
+                {
+                    "name": "Heart Rate Measurement", "uuid": "00002a37-0000-1000-8000-00805f9b34fb",
+                    "props": "NOTIFY | INDICATE", "val": "74 BPM (RR: 812ms)", "hex": "0x16 0x4A 0x2C 0x03"
+                },
+                {
+                    "name": "Body Sensor Location", "uuid": "00002a38-0000-1000-8000-00805f9b34fb",
+                    "props": "READ", "val": "Chest (Position 0x01)", "hex": "0x01"
+                }
+            ]
+        },
+        {
+            "name": "Nordic UART Serial Service (NUS)",
+            "uuid": "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+            "chars": [
+                {
+                    "name": "NUS RX Characteristic", "uuid": "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
+                    "props": "WRITE | WRITE_NO_RESP", "val": "\"AT+STATUS=OK\\r\\n\"", "hex": "0x41 0x54 0x2B 0x53"
+                },
+                {
+                    "name": "NUS TX Characteristic", "uuid": "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
+                    "props": "NOTIFY", "val": "\"OK\\r\\n\"", "hex": "0x4F 0x4B 0x0D 0x0A"
+                }
+            ]
+        },
+        {
+            "name": "Battery Service (0x180F)",
+            "uuid": "0000180f-0000-1000-8000-00805f9b34fb",
+            "chars": [
+                {
+                    "name": "Battery Level", "uuid": "00002a19-0000-1000-8000-00805f9b34fb",
+                    "props": "READ | NOTIFY", "val": "94%", "hex": "0x5E"
+                }
+            ]
+        }
+    ]
 
-    # Service 1: Nordic UART Service
-    draw.rounded_rectangle([(x1, sy), (x2, sy + 380)], radius=10, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, sy + 14), "Nordic UART Service (NUS)", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, sy + 34), "6E400001-B5A3-F393-E0A9-E50E24DCCA9E", font=font_mono, fill=(100, 116, 139))
+    sy = y1 + 104
+    for svc in services:
+        draw.rounded_rectangle([(x1, sy), (x2, sy + 38)], radius=6, fill=(30, 41, 59))
+        draw.text((x1 + 14, sy + 10), svc["name"], font=font_bold, fill=(0, 229, 255))
 
-    # Characteristic 1: RX (Write)
-    cy = sy + 60
-    draw.rounded_rectangle([(x1 + 12, cy), (x2 - 12, cy + 130)], radius=6, fill=(30, 41, 59))
-    draw.text((x1 + 22, cy + 12), "Nordic UART RX (Write)", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 22, cy + 32), "6E400002-B5A3-F393-E0A9-E50E24DCCA9E", font=font_mono, fill=(148, 163, 184))
-    draw.text((x2 - 160, cy + 12), "WRITE | WRITE_NO_RESP", font=font_badge, fill=(0, 229, 255))
+        cy = sy + 44
+        for ch in svc["chars"]:
+            draw.rounded_rectangle([(x1 + 10, cy), (x2, cy + 96)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+            draw.text((x1 + 24, cy + 10), ch["name"], font=font_bold, fill=(248, 250, 252))
+            draw.text((x1 + 24, cy + 30), ch["uuid"], font=font_mono, fill=(100, 116, 139))
 
-    draw.rounded_rectangle([(x1 + 22, cy + 54), (x2 - 22, cy + 86)], radius=4, fill=(9, 13, 22))
-    draw.text((x1 + 30, cy + 62), "Value: 41 43 4B 3A 20 4F 4B 00  (\"ACK: OK\\0\")", font=font_mono, fill=(0, 229, 255))
+            draw.rounded_rectangle([(x2 - 170, cy + 8), (x2 - 12, cy + 32)], radius=4, fill=(10, 35, 60))
+            draw.text((x2 - 162, cy + 12), ch["props"], font=font_badge, fill=(0, 229, 255))
 
-    draw.rounded_rectangle([(x1 + 22, cy + 94), (x1 + 100, cy + 122)], radius=4, fill=(0, 229, 255))
-    draw.text((x1 + 38, cy + 100), "WRITE", font=font_badge, fill=(0, 0, 0))
+            draw.text((x1 + 24, cy + 54), f"Parsed: {ch['val']}", font=font_mono, fill=(0, 230, 118))
+            draw.text((x1 + 24, cy + 74), f"Raw Hex: {ch['hex']}", font=font_mono, fill=(148, 163, 184))
 
-    # Characteristic 2: TX (Notify)
-    cy += 142
-    draw.rounded_rectangle([(x1 + 12, cy), (x2 - 12, cy + 160)], radius=6, fill=(30, 41, 59))
-    draw.text((x1 + 22, cy + 12), "Nordic UART TX (Notify Stream)", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 22, cy + 32), "6E400003-B5A3-F393-E0A9-E50E24DCCA9E", font=font_mono, fill=(148, 163, 184))
-    draw.text((x2 - 110, cy + 12), "NOTIFY (ACTIVE)", font=font_badge, fill=(0, 230, 118))
+            # Action pills
+            draw.rounded_rectangle([(x2 - 80, cy + 58), (x2 - 14, cy + 86)], radius=4, fill=(51, 65, 85))
+            draw.text((x2 - 68, cy + 64), "READ", font=font_badge, fill=(248, 250, 252))
 
-    draw.rounded_rectangle([(x1 + 22, cy + 54), (x2 - 22, cy + 116)], radius=4, fill=(9, 13, 22))
-    draw.text((x1 + 30, cy + 62), "HEX: 00 00 20 41 00 00 48 42 00 00 1C 41", font=font_mono, fill=(0, 229, 255))
-    draw.text((x1 + 30, cy + 80), "3-Channel Float32: X=10.00 | Y=50.00 | Z=9.75", font=font_mono, fill=(248, 250, 252))
-    draw.text((x1 + 30, cy + 98), "Frequency: 10 Hz Telemetry Stream", font=font_mono, fill=(100, 116, 139))
-
-    draw.rounded_rectangle([(x1 + 22, cy + 124), (x1 + 150, cy + 152)], radius=4, fill=(124, 77, 255))
-    draw.text((x1 + 34, cy + 130), "ROUTE TO SCOPE", font=font_badge, fill=(255, 255, 255))
-
-    # Service 2: Battery
-    sy += 394
-    draw.rounded_rectangle([(x1, sy), (x2, sy + 150)], radius=10, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, sy + 14), "Battery Service (0x180F)", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, sy + 34), "0000180F-0000-1000-8000-00805F9B34FB", font=font_mono, fill=(100, 116, 139))
-    draw.text((x1 + 16, sy + 64), "Battery Level (0x2A19): 94% (Read, Notify)", font=font_bold, fill=(0, 230, 118))
+            cy += 104
+        sy = cy + 10
 
 def render_oscilloscope(draw, rect, px, py, pw, ph):
     font_bold = get_font(15, bold=True)
-    font_sub = get_font(13)
     font_mono = get_font(12, mono=True)
-    font_badge = get_font(11, bold=True, mono=True)
+    font_sub = get_font(13)
 
     x1, y1, x2, y2 = rect
 
-    # Top Control Bar
-    draw.rounded_rectangle([(x1, y1), (x2, y1 + 70)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, y1 + 14), "Real-Time Waveform Oscilloscope", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, y1 + 38), "Stream: 3-Axis Accelerometer (X, Y, Z Float32)", font=font_mono, fill=(0, 229, 255))
+    # Controls
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 54)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+    draw.text((x1 + 14, y1 + 16), "Stream: Heart Rate (BPM) + 3-Axis Accel", font=font_bold, fill=(248, 250, 252))
 
-    draw.rounded_rectangle([(x2 - 170, y1 + 18), (x2 - 96, y1 + 52)], radius=6, fill=(0, 229, 255))
-    draw.text((x2 - 156, y1 + 26), "LIVE 10Hz", font=font_badge, fill=(0, 0, 0))
+    draw.rounded_rectangle([(x2 - 120, y1 + 10), (x2 - 12, y1 + 44)], radius=6, fill=(0, 230, 118))
+    draw.text((x2 - 100, y1 + 18), "LIVE 60 FPS", font=get_font(11, bold=True, mono=True), fill=(0, 0, 0))
 
-    draw.rounded_rectangle([(x2 - 86, y1 + 18), (x2 - 16, y1 + 52)], radius=6, fill=(30, 41, 59), outline=(51, 65, 85))
-    draw.text((x2 - 70, y1 + 26), "PAUSE", font=font_badge, fill=(248, 250, 252))
+    # Canvas Scope Area
+    scope_y1 = y1 + 64
+    scope_y2 = scope_y1 + 420
+    draw.rounded_rectangle([(x1, scope_y1), (x2, scope_y2)], radius=12, fill=(4, 6, 10), outline=(51, 65, 85))
 
-    # Canvas Area
-    cy = y1 + 84
-    ch = 540
-    draw.rounded_rectangle([(x1, cy), (x2, cy + ch)], radius=8, fill=(4, 6, 10), outline=(51, 65, 85))
-
-    # Oscilloscope Grid
-    for gx in range(1, 8):
-        x = x1 + (x2 - x1) * gx // 8
-        draw.line([(x, cy), (x, cy + ch)], fill=(22, 32, 50), width=1)
-    for gy in range(1, 6):
-        y = cy + ch * gy // 6
-        draw.line([(x1, y), (x2, y)], fill=(22, 32, 50), width=1)
+    # Grid lines
+    for i in range(1, 8):
+        gx = x1 + (x2 - x1) * i // 8
+        draw.line([(gx, scope_y1), (gx, scope_y2)], fill=(22, 32, 50), width=1)
+    for j in range(1, 6):
+        gy = scope_y1 + (scope_y2 - scope_y1) * j // 6
+        draw.line([(x1, gy), (x2, gy)], fill=(22, 32, 50), width=1)
 
     # Center baseline
-    mid_y = cy + ch // 2
+    mid_y = (scope_y1 + scope_y2) // 2
     draw.line([(x1, mid_y), (x2, mid_y)], fill=(38, 56, 84), width=2)
-    draw.text((x1 + 10, mid_y - 18), "0.00", font=font_mono, fill=(100, 116, 139))
-    draw.text((x1 + 10, cy + 14), "+100.0", font=font_mono, fill=(100, 116, 139))
-    draw.text((x1 + 10, cy + ch - 26), "-100.0", font=font_mono, fill=(100, 116, 139))
 
-    # Draw waves
-    # Wave 1 (Cyan): Sine wave X
-    pts_x = []
-    pts_y = []
-    pts_z = []
-    steps = 120
-    for i in range(steps):
-        px_i = x1 + (x2 - x1) * i // steps
-        val_x = math.sin(i * 0.18) * 160 + math.sin(i * 0.05) * 40
-        val_y = math.cos(i * 0.15) * 120
-        val_z = math.sin(i * 0.35) * 60
+    # Waveform 1: ECG / Pulse (Red/Coral)
+    pts1 = []
+    width = x2 - x1
+    for step in range(0, width, 4):
+        x = x1 + step
+        t = (step % 240)
+        if t < 60:
+            y = mid_y - 20 + math.sin(t * 0.1) * 8
+        elif t < 80:
+            y = mid_y - 15 - math.sin((t - 60) * 0.15) * 15 # P wave
+        elif t < 100:
+            y = mid_y - 10
+        elif t < 110:
+            y = mid_y + 20 # Q dip
+        elif t < 125:
+            y = mid_y - 120 # R peak!
+        elif t < 140:
+            y = mid_y + 40 # S dip
+        elif t < 180:
+            y = mid_y - 35 - math.sin((t - 140) * 0.08) * 30 # T wave
+        else:
+            y = mid_y - 20
+        pts1.append((x, y))
 
-        pts_x.append((px_i, mid_y - int(val_x)))
-        pts_y.append((px_i, mid_y - int(val_y)))
-        pts_z.append((px_i, mid_y - int(val_z)))
+    for k in range(len(pts1) - 1):
+        draw.line([pts1[k], pts1[k + 1]], fill=(255, 61, 0), width=3)
 
-    draw.line(pts_x, fill=(0, 229, 255), width=3)
-    draw.line(pts_y, fill=(255, 61, 0), width=2)
-    draw.line(pts_z, fill=(0, 230, 118), width=2)
+    # Waveform 2: Accelerometer magnitude (Cyan)
+    pts2 = []
+    for step in range(0, width, 4):
+        x = x1 + step
+        y = mid_y + 80 + math.sin(step * 0.04) * 45 + math.cos(step * 0.12) * 15
+        pts2.append((x, y))
 
-    # Telemetry Channel Cards below scope
-    ty = cy + ch + 16
-    draw.text((x1, ty), "Telemetry Channel Metrics:", font=font_bold, fill=(248, 250, 252))
-    ty += 24
+    for k in range(len(pts2) - 1):
+        draw.line([pts2[k], pts2[k + 1]], fill=(0, 229, 255), width=2)
 
+    # Telemetry metrics row
+    my = scope_y2 + 16
     cards = [
-        ("Axis X", "+78.40", "-98.2", "+99.5", (0, 229, 255)),
-        ("Axis Y", "-12.60", "-79.1", "+80.0", (255, 61, 0)),
-        ("Axis Z", "+09.81", "-38.4", "+39.2", (0, 230, 118))
+        {"name": "Heart Rate", "val": "74 BPM", "sub": "Min: 68 | Max: 82", "col": (255, 61, 0)},
+        {"name": "Accel Magnitude", "val": "1.02 G", "sub": "X:0.04 Y:0.98 Z:0.2", "col": (0, 229, 255)},
+        {"name": "Sampling Rate", "val": "50.0 Hz", "sub": "Packet: 20ms", "col": (0, 230, 118)}
     ]
     cw = (x2 - x1 - 20) // 3
-    for i, (name, cur, mn, mx, col) in enumerate(cards):
+    for i, c in enumerate(cards):
         cx = x1 + i * (cw + 10)
-        draw.rounded_rectangle([(cx, ty), (cx + cw, ty + 96)], radius=8, fill=(17, 24, 39), outline=col)
-        draw.text((cx + 12, ty + 10), name, font=font_bold, fill=col)
-        draw.text((cx + 12, ty + 34), cur, font=get_font(20, bold=True, mono=True), fill=(248, 250, 252))
-        draw.text((cx + 12, ty + 68), f"Min: {mn} | Max: {mx}", font=font_mono, fill=(148, 163, 184))
+        draw.rounded_rectangle([(cx, my), (cx + cw, my + 90)], radius=8, fill=(17, 24, 39), outline=c["col"])
+        draw.text((cx + 12, my + 10), c["name"], font=font_sub, fill=c["col"])
+        draw.text((cx + 12, my + 34), c["val"], font=get_font(20, bold=True, mono=True), fill=(248, 250, 252))
+        draw.text((cx + 12, my + 64), c["sub"], font=font_mono, fill=(148, 163, 184))
 
 def render_fuzzer(draw, rect, px, py, pw, ph):
     font_bold = get_font(15, bold=True)
-    font_sub = get_font(13)
     font_mono = get_font(12, mono=True)
-    font_badge = get_font(11, bold=True, mono=True)
+    font_sub = get_font(13)
 
     x1, y1, x2, y2 = rect
 
-    # Top Control Bar
-    draw.rounded_rectangle([(x1, y1), (x2, y1 + 110)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, y1 + 14), "IoT Peripheral Security Fuzzer", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, y1 + 36), "Target: DE:AD:BE:EF:00:01 (Vulnerable Sensor)", font=font_mono, fill=(0, 229, 255))
-    draw.text((x1 + 16, y1 + 54), "Strategy: Boundary Value & Buffer Overflow Injection", font=font_sub, fill=(124, 77, 255))
-    draw.text((x1 + 16, y1 + 76), "Progress: 10 / 10 Tests Completed (1 Anomaly Detected)", font=font_mono, fill=(255, 23, 68))
+    # Fuzzer config card
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 120)], radius=10, fill=(17, 24, 39), outline=(255, 23, 68))
+    draw.text((x1 + 16, y1 + 14), "GATT Vulnerability & Boundary Fuzzer", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Target: 0000ffe1-0000-1000-8000-00805f9b34fb (Serial RX)", font=font_mono, fill=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 60), "Mutation Engine: Boundary Ints + Buffer Overflow (512B) + Format Strings", font=font_sub, fill=(148, 163, 184))
+    draw.text((x1 + 16, y1 + 86), "Probing Mode: Continuous Randomized Mutation | Interval: 25ms", font=font_mono, fill=(255, 179, 0))
 
-    draw.rounded_rectangle([(x2 - 130, y1 + 16), (x2 - 16, y1 + 50)], radius=6, fill=(124, 77, 255))
-    draw.text((x2 - 116, y1 + 24), "RE-RUN FUZZ", font=font_badge, fill=(255, 255, 255))
-
-    # Anomaly Alert Box
-    ay = y1 + 124
-    draw.rounded_rectangle([(x1, ay), (x2, ay + 64)], radius=8, fill=(40, 10, 15), outline=(255, 23, 68))
-    draw.text((x1 + 16, ay + 12), "CRITICAL FAULT DETECTED", font=font_bold, fill=(255, 23, 68))
-    draw.text((x1 + 16, ay + 36), "Test #10: Buffer overflow fault on 600-byte write (GATT_INVALID_ATTRIBUTE_LENGTH)", font=font_mono, fill=(248, 250, 252))
-
-    # Fuzz Test Case Log Table
-    ty = ay + 80
-    draw.text((x1, ty), "Execution Audit Trail:", font=font_bold, fill=(248, 250, 252))
-    ty += 24
-
-    cases = [
-        ("Zero Length Buffer (0 B)", "00 B", "SUCCESS", "15ms", "NORMAL", (0, 230, 118)),
-        ("Single Byte 0x00", "01 B", "SUCCESS", "18ms", "NORMAL", (0, 230, 118)),
-        ("Single Byte 0xFF", "01 B", "SUCCESS", "16ms", "NORMAL", (0, 230, 118)),
-        ("Default BLE MTU (20 B)", "20 B", "SUCCESS", "22ms", "NORMAL", (0, 230, 118)),
-        ("Standard ATT MTU (23 B)", "23 B", "SUCCESS", "24ms", "NORMAL", (0, 230, 118)),
-        ("High Speed MTU (247 B)", "247 B", "SUCCESS", "48ms", "NORMAL", (0, 230, 118)),
-        ("Max ATT MTU (512 B)", "512 B", "SUCCESS", "52ms", "NORMAL", (0, 230, 118)),
-        ("Max Android MTU (517 B)", "517 B", "SUCCESS", "54ms", "NORMAL", (0, 230, 118)),
-        ("Format String (%s%n%x)", "32 B", "SUCCESS", "25ms", "NORMAL", (0, 230, 118)),
-        ("Oversized Buffer (600 B)", "600 B", "FAILURE", "50ms", "ANOMALY", (255, 23, 68))
+    # Stats row
+    fy = y1 + 134
+    stats = [
+        ("Packets Sent", "1,420", (0, 229, 255)),
+        ("Crashes / Disconnects", "2 DETECTED", (255, 23, 68)),
+        ("Anomalies", "14 (Timeout)", (255, 179, 0)),
+        ("Current Speed", "40 pkt/sec", (0, 230, 118))
     ]
+    sw = (x2 - x1 - 30) // 4
+    for i, (k, v, col) in enumerate(stats):
+        sx = x1 + i * (sw + 10)
+        draw.rounded_rectangle([(sx, fy), (sx + sw, fy + 70)], radius=6, fill=(17, 24, 39), outline=(51, 65, 85))
+        draw.text((sx + 8, fy + 8), k, font=get_font(10), fill=(148, 163, 184))
+        draw.text((sx + 8, fy + 32), v, font=get_font(13, bold=True, mono=True), fill=col)
 
-    for title, sz, status, lat, tag, col in cases:
-        draw.rounded_rectangle([(x1, ty), (x2, ty + 46)], radius=6, fill=(17, 24, 39), outline=col if tag == "ANOMALY" else (51, 65, 85))
-        draw.text((x1 + 14, ty + 8), title, font=font_bold, fill=(248, 250, 252))
-        draw.text((x1 + 14, ty + 26), f"Payload: {sz} | Latency: {lat} | Status: {status}", font=font_mono, fill=(148, 163, 184))
+    # Execution Console
+    cy = fy + 82
+    draw.rounded_rectangle([(x1, cy), (x2, cy + 300)], radius=8, fill=(4, 6, 10), outline=(51, 65, 85))
+    draw.text((x1 + 14, cy + 12), "LIVE PROBE AUDIT LOG", font=get_font(12, bold=True, mono=True), fill=(0, 229, 255))
 
-        draw.rounded_rectangle([(x2 - 90, ty + 10), (x2 - 14, ty + 36)], radius=4, fill=(col[0]//6, col[1]//6, col[2]//6), outline=col)
-        draw.text((x2 - 80, ty + 16), tag, font=font_badge, fill=col)
-        ty += 52
+    logs = [
+        ("[09:41:02.102] TX BOUNDARY_INT_32: 0x7FFFFFFF (2147483647) -> ACK 0x00 (Success)", (148, 163, 184)),
+        ("[09:41:02.128] TX BOUNDARY_INT_32: 0x80000000 (-2147483648) -> ACK 0x00 (Success)", (148, 163, 184)),
+        ("[09:41:02.155] TX OVERFLOW_STRING: 'A'*256 bytes -> GATT_STATUS_SUCCESS", (148, 163, 184)),
+        ("[09:41:02.180] TX OVERFLOW_STRING: 'A'*512 bytes -> GATT_ERROR (0x85) Buffer Truncation", (255, 179, 0)),
+        ("[09:41:02.210] TX FORMAT_STRING: '%x%x%s%n%p' -> DEVICE UNRESPONSIVE (Timeout 2000ms)", (255, 23, 68)),
+        ("[09:41:04.215] ANOMALY DETECTED: GattCallback timed out on handle 0x002A", (255, 23, 68)),
+        ("[09:41:04.230] TX RECONNECT_PROBE: Peripheral auto-rebooted with Watchdog Reset!", (0, 230, 118)),
+        ("[09:41:04.300] TX BIT_FLIP_MUTATION: 0xFF 0x00 0xAA 0x55 -> ACK 0x00", (148, 163, 184))
+    ]
+    for i, (line, col) in enumerate(logs):
+        draw.text((x1 + 14, cy + 40 + i * 32), line, font=font_mono, fill=col)
 
 def render_simulator(draw, rect, px, py, pw, ph):
     font_bold = get_font(15, bold=True)
-    font_sub = get_font(13)
     font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+
+    x1, y1, x2, y2 = rect
+
+    # Simulator Header
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 90)], radius=10, fill=(17, 24, 39), outline=(124, 77, 255))
+    draw.text((x1 + 16, y1 + 14), "Virtual GATT Peripheral Simulator", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Advertising Name: \"BLEPulse-Virtual-ESP32\" (Nordic ID 0x0059)", font=font_mono, fill=(124, 77, 255))
+    draw.text((x1 + 16, y1 + 60), "Status: BROADCASTING ADVERTISING FRAMES (Connectable)", font=font_sub, fill=(0, 230, 118))
+
+    # Profiles active
+    sy = y1 + 104
+    profiles = [
+        ("Simulated Heart Rate Sensor (0x180D)", "Generates synthetic 60-100 BPM sinusoidal cardiac rhythm with Notify"),
+        ("Simulated Environmental Station (0x181A)", "Streams virtual BME280 temperature (22.4°C) and humidity (48%) telemetry"),
+        ("Emulated NUS UART Loopback Echo", "Replies to received write packets with uppercase ASCII echo response")
+    ]
+    for p_name, p_desc in profiles:
+        draw.rounded_rectangle([(x1, sy), (x2, sy + 76)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+        draw.text((x1 + 16, sy + 12), p_name, font=font_bold, fill=(0, 229, 255))
+        draw.text((x1 + 16, sy + 38), p_desc, font=font_sub, fill=(148, 163, 184))
+        draw.rounded_rectangle([(x2 - 100, sy + 18), (x2 - 16, sy + 48)], radius=6, fill=(0, 40, 25), outline=(0, 230, 118))
+        draw.text((x2 - 86, sy + 26), "ACTIVE", font=get_font(11, bold=True, mono=True), fill=(0, 230, 118))
+        sy += 88
+
+def render_terminal(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
     font_badge = get_font(11, bold=True, mono=True)
 
     x1, y1, x2, y2 = rect
 
-    # Top Control Bar
-    draw.rounded_rectangle([(x1, y1), (x2, y1 + 100)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
-    draw.text((x1 + 16, y1 + 14), "Virtual GATT Server Simulator", font=font_bold, fill=(248, 250, 252))
-    draw.text((x1 + 16, y1 + 36), "Emulated Profile: Heart Rate Sensor (0x180D)", font=font_mono, fill=(0, 229, 255))
-    draw.text((x1 + 16, y1 + 54), "Advertising: \"BLEPulse Heart Rate Monitor\" | Connectable", font=font_sub, fill=(148, 163, 184))
+    # Top Serial Info
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 80)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 14), "Bidirectional BLE Serial UART Terminal", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Channel: Nordic NUS (6E400001) | Mode: ASCII + Hex | Ending: CRLF", font=font_mono, fill=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 58), "Connected to: ESP32-S3 (24:0A:C4:88:99:AA)", font=font_sub, fill=(0, 230, 118))
 
-    draw.rounded_rectangle([(x1 + 16, y1 + 72), (x1 + 140, y1 + 94)], radius=4, fill=(0, 50, 20), outline=(0, 230, 118))
-    draw.text((x1 + 24, y1 + 76), "SERVER ACTIVE", font=font_badge, fill=(0, 230, 118))
+    # Macro action pills
+    my = y1 + 92
+    macros = ["AT+GMR", "AT+BLEINIT=2", "0xAA 0x55 0x01", "PING", "RESET"]
+    mx = x1
+    for m in macros:
+        draw.rounded_rectangle([(mx, my), (mx + 110, my + 32)], radius=6, fill=(30, 41, 59), outline=(51, 65, 85))
+        draw.text((mx + 16, my + 8), m, font=font_mono, fill=(0, 229, 255))
+        mx += 120
 
-    draw.rounded_rectangle([(x2 - 120, y1 + 18), (x2 - 16, y1 + 52)], radius=6, fill=(255, 23, 68))
-    draw.text((x2 - 108, y1 + 26), "STOP SERVER", font=font_badge, fill=(255, 255, 255))
+    # Terminal Monospace Console
+    ty = my + 44
+    draw.rounded_rectangle([(x1, ty), (x2, ty + 380)], radius=8, fill=(4, 6, 10), outline=(51, 65, 85))
 
-    # Profile Characteristics
-    sy = y1 + 116
-    draw.text((x1, sy), "Emulated GATT Services & Characteristics:", font=font_bold, fill=(248, 250, 252))
-    sy += 24
-
-    chars = [
-        ("Heart Rate Measurement (0x2A37)", "Dynamic Cardiac Rhythm (60-120 BPM)", "00 48", "72 BPM (HRV sinusoidal)", (255, 23, 68)),
-        ("Body Sensor Location (0x2A38)", "Static Value", "01", "Chest Location", (0, 229, 255)),
-        ("Battery Level (0x180F -> 0x2A19)", "Discharging Battery Simulation", "5E", "94% Remaining", (0, 230, 118))
+    lines = [
+        ("[09:41:10.012] [SYS] Auto-detected Nordic UART Service (NUS)", (100, 116, 139)),
+        ("[09:41:10.050] [SYS] Subscribed to TX notifications (CCCD 0x2902 enabled)", (0, 230, 118)),
+        ("[09:41:11.200] [TX ->] AT+GMR\\r\\n (8 bytes)", (0, 229, 255)),
+        ("[09:41:11.240] [<- RX] AT version:2.4.0.0(s-4c3e8)\\r\\n", (0, 230, 118)),
+        ("[09:41:11.250] [<- RX] SDK version:v5.1.2-dirty\\r\\n", (0, 230, 118)),
+        ("[09:41:11.260] [<- RX] OK\\r\\n", (0, 230, 118)),
+        ("[09:41:14.500] [TX ->] 0xAA 0x55 0x01 0x08 (Binary payload)", (0, 229, 255)),
+        ("[09:41:14.530] [<- RX] 0xAA 0x55 0x01 0x08 0x00 0xFE (ACK response)", (0, 230, 118)),
+        ("[09:41:18.100] [TX ->] PING\\r\\n", (0, 229, 255)),
+        ("[09:41:18.125] [<- RX] PONG latency=25ms\\r\\n", (0, 230, 118))
     ]
+    for i, (l_text, l_col) in enumerate(lines):
+        draw.text((x1 + 14, ty + 16 + i * 35), l_text, font=font_mono, fill=l_col)
 
-    for name, beh, raw, desc, col in chars:
-        draw.rounded_rectangle([(x1, sy), (x2, sy + 88)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
-        draw.text((x1 + 16, sy + 12), name, font=font_bold, fill=(248, 250, 252))
-        draw.text((x1 + 16, sy + 34), f"Behavior: {beh}", font=font_mono, fill=(124, 77, 255))
+    # Send input box
+    iy = ty + 392
+    draw.rounded_rectangle([(x1, iy), (x2 - 100, iy + 42)], radius=6, fill=(17, 24, 39), outline=(51, 65, 85))
+    draw.text((x1 + 14, iy + 12), "AT+WIFI_STATUS?", font=font_mono, fill=(248, 250, 252))
+    draw.rounded_rectangle([(x2 - 90, iy), (x2, iy + 42)], radius=6, fill=(0, 229, 255))
+    draw.text((x2 - 68, iy + 12), "SEND", font=font_badge, fill=(0, 0, 0))
 
-        draw.rounded_rectangle([(x1 + 16, sy + 54), (x2 - 16, sy + 80)], radius=4, fill=(9, 13, 22))
-        draw.text((x1 + 24, sy + 60), f"Current Byte Value: {raw}  ({desc})", font=font_mono, fill=col)
-        sy += 98
+def render_geiger(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+    font_badge = get_font(11, bold=True, mono=True)
 
-    # Activity Log
-    draw.text((x1, sy + 10), "Live GATT Server Request Log:", font=font_bold, fill=(248, 250, 252))
-    sy += 34
+    x1, y1, x2, y2 = rect
 
-    logs = [
-        "09:41:22 - Central 5C:02:72:11:AA:BB connected (MTU negotiated: 517)",
-        "09:41:23 - CCCD subscription enabled for Heart Rate (0x2A37)",
-        "09:41:24 - Dispatched Notification: 0x00 0x48 (72 BPM)",
-        "09:41:25 - Dispatched Notification: 0x00 0x4B (75 BPM)",
-        "09:41:26 - Dispatched Notification: 0x00 0x4A (74 BPM)",
-        "09:41:27 - Read request on Body Sensor Location (0x2A38) -> returned 0x01"
+    # Top Header
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 75)], radius=10, fill=(17, 24, 39), outline=(0, 230, 118))
+    draw.text((x1 + 16, y1 + 14), "Audio & Haptic Geiger Counter Proximity Tracker", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Target: Nordic_HRM_Sensor (E0:4E:01:23:45:67)", font=font_mono, fill=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 56), "Audio Clicks: ON (Synthetic 1.5kHz PCM) | Haptic: ON", font=font_sub, fill=(0, 230, 118))
+
+    # Geiger Meter Canvas
+    gy = y1 + 90
+    draw.rounded_rectangle([(x1, gy), (x2, gy + 320)], radius=12, fill=(4, 6, 10), outline=(51, 65, 85))
+
+    # Arc gauge
+    cx, cy_g = (x1 + x2) // 2, gy + 220
+    draw.arc([(cx - 200, cy_g - 200), (cx + 200, cy_g + 200)], start=180, end=360, fill=(30, 41, 59), width=18)
+    draw.arc([(cx - 200, cy_g - 200), (cx + 200, cy_g + 200)], start=180, end=310, fill=(0, 230, 118), width=18)
+
+    # Needle pointing towards -48 dBm
+    angle_rad = math.radians(310)
+    nx = cx + int(170 * math.cos(angle_rad))
+    ny = cy_g + int(170 * math.sin(angle_rad))
+    draw.line([(cx, cy_g), (nx, ny)], fill=(255, 61, 0), width=4)
+    draw.ellipse([(cx - 14, cy_g - 14), (cx + 14, cy_g + 14)], fill=(248, 250, 252))
+
+    # Gauge labels
+    draw.text((cx - 190, cy_g + 10), "-100 dBm", font=font_mono, fill=(100, 116, 139))
+    draw.text((cx + 130, cy_g + 10), "-35 dBm", font=font_mono, fill=(0, 230, 118))
+
+    # Prominent RSSI & Distance
+    draw.text((cx - 100, gy + 80), "-48 dBm", font=get_font(42, bold=True, mono=True), fill=(0, 230, 118))
+    draw.text((cx - 80, gy + 140), "Estimated Distance: ~0.42 meters", font=font_bold, fill=(248, 250, 252))
+
+    # Proximity zone badge
+    draw.rounded_rectangle([(cx - 110, gy + 175), (cx + 110, gy + 205)], radius=6, fill=(0, 40, 25), outline=(0, 230, 118))
+    draw.text((cx - 86, gy + 182), "ZONE: IMMEDIATE (<0.5m)", font=font_badge, fill=(0, 230, 118))
+
+    # Audio/Haptic metrics
+    my = gy + 334
+    draw.rounded_rectangle([(x1, my), (x2, my + 110)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+    draw.text((x1 + 16, my + 14), "PULSE ENGINE TELEMETRY", font=font_bold, fill=(0, 229, 255))
+    draw.text((x1 + 16, my + 40), "Click Frequency: 18.4 Hz (High Proximity Rate)", font=font_mono, fill=(248, 250, 252))
+    draw.text((x1 + 16, my + 62), "Haptic Vibration Waveform: Periodic 15ms pulses @ 54ms intervals", font=font_mono, fill=(148, 163, 184))
+    draw.text((x1 + 16, my + 84), "EMA Smoothed Filter: Alpha 0.25 (Stabilized RSSI)", font=font_mono, fill=(100, 116, 139))
+
+def render_audit(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+    font_badge = get_font(11, bold=True, mono=True)
+
+    x1, y1, x2, y2 = rect
+
+    # Chipset Fingerprint Banner
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 110)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 14), "CHIPSET FINGERPRINT IDENTIFIED", font=get_font(11, bold=True), fill=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 34), "Nordic Semiconductor nRF52840", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 58), "Architecture: ARM Cortex-M4F with FPU | Confidence: 95%", font=font_sub, fill=(0, 230, 118))
+    draw.text((x1 + 16, y1 + 80), "Identified via Nordic UART Profile & SIG Company ID 0x0059", font=font_mono, fill=(148, 163, 184))
+
+    # Security Score Card
+    sy = y1 + 124
+    draw.rounded_rectangle([(x1, sy), (x2, sy + 75)], radius=8, fill=(17, 24, 39), outline=(255, 179, 0))
+    draw.text((x1 + 16, sy + 14), "SECURITY AUDIT SCORE", font=get_font(11, bold=True), fill=(255, 179, 0))
+    draw.text((x1 + 16, sy + 38), "75 / 100", font=get_font(24, bold=True, mono=True), fill=(255, 179, 0))
+    draw.text((x1 + 160, sy + 44), "MEDIUM VULNERABILITY EXPOSURE (2 Warnings)", font=font_sub, fill=(248, 250, 252))
+
+    # Findings
+    fy = sy + 90
+    findings = [
+        ("HIGH", "Unencrypted Serial REPL / UART Console Exposed", "Nordic UART RX accepts raw writes without requiring BLE SC bonding or encryption.", (255, 61, 0)),
+        ("MEDIUM", "Write Without Response Buffer Saturation Risk", "Characteristics accept unacknowledged bursts, vulnerable to MCU packet drop.", (255, 179, 0)),
+        ("INFO", "Nordic SoftDevice SweynTooth Advisory", "Firmware version S140 v7.0.1 - ensure patched against Key Size Overflow.", (0, 229, 255))
     ]
-    draw.rounded_rectangle([(x1, sy), (x2, sy + 170)], radius=8, fill=(9, 13, 22), outline=(51, 65, 85))
-    for i, log in enumerate(logs):
-        draw.text((x1 + 16, sy + 12 + i * 24), f"• {log}", font=font_mono, fill=(148, 163, 184))
+    for sev, title, desc, col in findings:
+        draw.rounded_rectangle([(x1, fy), (x2, fy + 88)], radius=8, fill=(17, 24, 39), outline=col)
+        draw.rounded_rectangle([(x1 + 14, fy + 12), (x1 + 80, fy + 34)], radius=4, fill=col)
+        draw.text((x1 + 22, fy + 16), sev, font=font_badge, fill=(0, 0, 0))
+        draw.text((x1 + 90, fy + 14), title, font=font_bold, fill=(248, 250, 252))
+        draw.text((x1 + 14, fy + 44), desc, font=font_sub, fill=(148, 163, 184))
+        fy += 100
+
+def render_macro(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+    font_badge = get_font(11, bold=True, mono=True)
+
+    x1, y1, x2, y2 = rect
+
+    # Top Macro Header
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 85)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 14), "GATT Macro Automation & Sequence Test Runner", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Scenario: Nordic NUS Echo & Reliability Test Suite", font=font_mono, fill=(0, 229, 255))
+    draw.text((x1 + 16, y1 + 58), "Target: Nordic_HRM_Sensor | Result: 5 / 5 PASSED (100%)", font=font_sub, fill=(0, 230, 118))
+
+    # Steps list
+    my = y1 + 100
+    steps = [
+        ("Step 1: Request MTU 247", "PASSED", "Negotiated 247 bytes in 28ms", (0, 230, 118)),
+        ("Step 2: Request High-Speed LE 2M PHY", "PASSED", "Switched TX/RX to 2M in 42ms", (0, 230, 118)),
+        ("Step 3: Enable NUS TX CCCD Notification", "PASSED", "Subscribed to handle 0x0014 in 35ms", (0, 230, 118)),
+        ("Step 4: Transmit Loopback String 'PING'", "PASSED", "Sent 4 bytes without response in 12ms", (0, 230, 118)),
+        ("Step 5: Assert RX Echo Matches 'PING'", "PASSED", "Received expected ASCII response in 22ms", (0, 230, 118))
+    ]
+    for s_name, status, details, col in steps:
+        draw.rounded_rectangle([(x1, my), (x2, my + 68)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+        draw.text((x1 + 16, my + 12), s_name, font=font_bold, fill=(248, 250, 252))
+        draw.rounded_rectangle([(x2 - 90, my + 10), (x2 - 14, my + 34)], radius=4, fill=(0, 40, 25), outline=col)
+        draw.text((x2 - 78, my + 16), status, font=font_badge, fill=col)
+        draw.text((x1 + 16, my + 38), details, font=font_mono, fill=(148, 163, 184))
+        my += 80
+
+def render_fota(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+    font_badge = get_font(11, bold=True, mono=True)
+
+    x1, y1, x2, y2 = rect
+
+    # Top Header
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 80)], radius=10, fill=(17, 24, 39), outline=(124, 77, 255))
+    draw.text((x1 + 16, y1 + 14), "FOTA Firmware Flasher", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, y1 + 38), "Target Protocol: ESP32 BLE OTA (NimBLE / ESP-IDF)", font=font_mono, fill=(124, 77, 255))
+    draw.text((x1 + 16, y1 + 58), "Target Device: ESP32-S3 Environment Station", font=font_sub, fill=(0, 230, 118))
+
+    # Firmware Metadata Card
+    my = y1 + 94
+    draw.rounded_rectangle([(x1, my), (x2, my + 100)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+    draw.text((x1 + 16, my + 14), "firmware_esp32_v2.1.0.bin (64 KB / 65,536 bytes)", font=font_bold, fill=(248, 250, 252))
+    draw.text((x1 + 16, my + 38), "Header Magic: 0xE9 0x03 0x02 0x20 | Format: ESP32 App Binary", font=font_mono, fill=(0, 229, 255))
+    draw.text((x1 + 16, my + 60), "CRC32: 0x9E4B21D0 | SHA-256: 7f83b1657ff1... (Verified)", font=font_mono, fill=(0, 230, 118))
+    draw.text((x1 + 16, my + 80), "Chunk Size: 244 bytes | Inter-Chunk Delay: 5ms", font=font_mono, fill=(148, 163, 184))
+
+    # Progress Card
+    py_c = my + 114
+    draw.rounded_rectangle([(x1, py_c), (x2, py_c + 120)], radius=10, fill=(17, 24, 39), outline=(0, 229, 255))
+    draw.text((x1 + 16, py_c + 14), "FLASHING IN PROGRESS...", font=get_font(12, bold=True), fill=(0, 229, 255))
+    draw.text((x2 - 70, py_c + 14), "68%", font=get_font(18, bold=True, mono=True), fill=(0, 229, 255))
+
+    # Progress bar
+    draw.rounded_rectangle([(x1 + 16, py_c + 44), (x2 - 16, py_c + 56)], radius=6, fill=(30, 41, 59))
+    draw.rounded_rectangle([(x1 + 16, py_c + 44), (x1 + int((x2 - x1 - 32) * 0.68), py_c + 56)], radius=6, fill=(0, 229, 255))
+
+    draw.text((x1 + 16, py_c + 72), "Throughput: 18.4 kbps (~2.3 kB/s)", font=font_mono, fill=(0, 230, 118))
+    draw.text((x1 + 16, py_c + 94), "Transferred: 44,564 / 65,536 B (Chunk 182 / 269) | ETA: 9s", font=font_mono, fill=(148, 163, 184))
+
+    # Console Logs
+    ly = py_c + 134
+    draw.rounded_rectangle([(x1, ly), (x2, ly + 140)], radius=8, fill=(4, 6, 10), outline=(51, 65, 85))
+    fota_logs = [
+        "[09:41:30.010] [TX] OTA_BEGIN: size 65536 bytes -> ACK",
+        "[09:41:30.120] [TX] Writing chunk 100/269 (244 bytes)",
+        "[09:41:30.550] [TX] Writing chunk 150/269 (244 bytes)",
+        "[09:41:30.880] [TX] Writing chunk 182/269 (244 bytes) - OK"
+    ]
+    for i, flog in enumerate(fota_logs):
+        draw.text((x1 + 14, ly + 14 + i * 30), flog, font=font_mono, fill=(148, 163, 184))
+
+def render_fft(draw, rect, px, py, pw, ph):
+    font_bold = get_font(15, bold=True)
+    font_mono = get_font(12, mono=True)
+    font_sub = get_font(13)
+
+    x1, y1, x2, y2 = rect
+
+    # Top Controls
+    draw.rounded_rectangle([(x1, y1), (x2, y1 + 54)], radius=8, fill=(17, 24, 39), outline=(51, 65, 85))
+    draw.text((x1 + 14, y1 + 16), "Mode: Frequency Spectrum (FFT) | Window: Hanning", font=font_bold, fill=(248, 250, 252))
+
+    draw.rounded_rectangle([(x2 - 130, y1 + 10), (x2 - 12, y1 + 44)], radius=6, fill=(124, 77, 255))
+    draw.text((x2 - 116, y1 + 18), "FFT SPECTRUM", font=get_font(11, bold=True, mono=True), fill=(255, 255, 255))
+
+    # FFT Canvas
+    scope_y1 = y1 + 64
+    scope_y2 = scope_y1 + 420
+    draw.rounded_rectangle([(x1, scope_y1), (x2, scope_y2)], radius=12, fill=(4, 6, 10), outline=(51, 65, 85))
+
+    # Grid
+    for i in range(1, 8):
+        gx = x1 + (x2 - x1) * i // 8
+        draw.line([(gx, scope_y1), (gx, scope_y2)], fill=(22, 32, 50), width=1)
+    for j in range(1, 6):
+        gy = scope_y1 + (scope_y2 - scope_y1) * j // 6
+        draw.line([(x1, gy), (x2, gy)], fill=(22, 32, 50), width=1)
+
+    # Spectrum gradient bars
+    num_bins = 48
+    bar_w = (x2 - x1 - 20) // num_bins
+    bx = x1 + 10
+
+    for b in range(num_bins):
+        freq = b * (25.0 / num_bins)
+        # Synthesize peak at 1.2 Hz (cardiac rhythm) and harmonic at 2.4 Hz
+        if abs(freq - 1.2) < 0.6:
+            norm_mag = 0.92 - abs(freq - 1.2) * 0.7
+        elif abs(freq - 2.4) < 0.6:
+            norm_mag = 0.45 - abs(freq - 2.4) * 0.4
+        elif abs(freq - 10.0) < 1.0:
+            norm_mag = 0.25
+        else:
+            norm_mag = 0.05 + (b % 5) * 0.02
+
+        bar_h = int(norm_mag * 340)
+        by = scope_y2 - bar_h - 10
+
+        draw.rectangle([(bx, by), (bx + bar_w - 2, scope_y2 - 10)], fill=(124, 77, 255))
+        draw.rectangle([(bx, by), (bx + bar_w - 2, by + 10)], fill=(0, 229, 255))
+        bx += bar_w
+
+    # Peak frequency marker
+    peak_x = x1 + 10 + int(1.2 * (num_bins / 25.0) * bar_w)
+    draw.line([(peak_x, scope_y1 + 40), (peak_x, scope_y2 - 10)], fill=(0, 230, 118), width=2)
+    draw.ellipse([(peak_x - 6, scope_y1 + 34), (peak_x + 6, scope_y1 + 46)], fill=(0, 230, 118))
+    draw.text((peak_x + 10, scope_y1 + 30), "Peak: 1.23 Hz (74 BPM)", font=font_mono, fill=(0, 230, 118))
+
+    # Telemetry metrics row
+    my = scope_y2 + 16
+    cards = [
+        {"name": "Dominant Peak", "val": "1.23 Hz", "sub": "74.0 BPM Heart Rate", "col": (0, 230, 118)},
+        {"name": "Nyquist Limit", "val": "25.0 Hz", "sub": "Sampling Rate: 50.0 Hz", "col": (0, 229, 255)},
+        {"name": "FFT Resolution", "val": "256 Bins", "sub": "Window: Hanning (Cooley-Tukey)", "col": (124, 77, 255)}
+    ]
+    cw = (x2 - x1 - 20) // 3
+    for i, c in enumerate(cards):
+        cx = x1 + i * (cw + 10)
+        draw.rounded_rectangle([(cx, my), (cx + cw, my + 90)], radius=8, fill=(17, 24, 39), outline=c["col"])
+        draw.text((cx + 12, my + 10), c["name"], font=font_sub, fill=c["col"])
+        draw.text((cx + 12, my + 34), c["val"], font=get_font(18, bold=True, mono=True), fill=(248, 250, 252))
+        draw.text((cx + 12, my + 64), c["sub"], font=font_mono, fill=(148, 163, 184))
 
 def main():
-    print("Generating high-fidelity UI screenshots...")
+    print("Generating high-fidelity UI screenshots for all modules...")
 
-    s1 = draw_device_mockup(1200, 1650, "BLEPulse - Real-Time Advertising Scanner", "Scans BLE 5.x broadcast channels, decodes iBeacon & Eddystone, and plots RSSI proximity", render_scanner)
+    s1 = draw_device_mockup(1200, 1650, "BLEPulse - Real-Time Advertising Scanner", "Scans BLE 5.x broadcast channels, decodes iBeacon & Eddystone, and exports Wireshark PCAPs", render_scanner)
     s1.save(os.path.join(IMG_DIR, "blepulse_scanner.png"))
     print("[OK] blepulse_scanner.png")
 
@@ -447,6 +697,30 @@ def main():
     s3.save(os.path.join(IMG_DIR, "blepulse_oscilloscope.png"))
     print("[OK] blepulse_oscilloscope.png")
 
+    s_fft = draw_device_mockup(1200, 1650, "BLEPulse - Real-Time FFT Spectrum Analyzer", "Radix-2 Cooley-Tukey FFT spectral decomposition with Hanning windowing and peak tracking", render_fft)
+    s_fft.save(os.path.join(IMG_DIR, "blepulse_fft.png"))
+    print("[OK] blepulse_fft.png")
+
+    s_term = draw_device_mockup(1200, 1650, "BLEPulse - Bidirectional Serial UART Terminal", "Full-duplex serial console for Nordic NUS, ESP32 SPP, and custom embedded REPLs", render_terminal)
+    s_term.save(os.path.join(IMG_DIR, "blepulse_terminal.png"))
+    print("[OK] blepulse_terminal.png")
+
+    s_geiger = draw_device_mockup(1200, 1650, "BLEPulse - Audio & Haptic Geiger Tracker", "Analog needle meter with dynamic audio clicking and synchronized tactile pulses for signal hunting", render_geiger)
+    s_geiger.save(os.path.join(IMG_DIR, "blepulse_geiger.png"))
+    print("[OK] blepulse_geiger.png")
+
+    s_audit = draw_device_mockup(1200, 1650, "BLEPulse - Chipset Fingerprinting & Security Audit", "Heuristic identification of Nordic/ESP32/TI SoCs and vulnerability scoring for IoT peripherals", render_audit)
+    s_audit.save(os.path.join(IMG_DIR, "blepulse_audit.png"))
+    print("[OK] blepulse_audit.png")
+
+    s_macro = draw_device_mockup(1200, 1650, "BLEPulse - GATT Macro Automation Runner", "Automated sequence execution engine for hardware validation, commissioning, and regression tests", render_macro)
+    s_macro.save(os.path.join(IMG_DIR, "blepulse_macro.png"))
+    print("[OK] blepulse_macro.png")
+
+    s_fota = draw_device_mockup(1200, 1650, "BLEPulse - Nordic DFU & ESP32 FOTA Flasher", "Over-the-air firmware flashing engine with CRC32 verification and throughput telemetry", render_fota)
+    s_fota.save(os.path.join(IMG_DIR, "blepulse_fota.png"))
+    print("[OK] blepulse_fota.png")
+
     s4 = draw_device_mockup(1200, 1650, "BLEPulse - IoT Peripheral Fuzzer", "Stress-tests microcontrollers and GATT servers with boundary values, mutations, and overflow probes", render_fuzzer)
     s4.save(os.path.join(IMG_DIR, "blepulse_fuzzer.png"))
     print("[OK] blepulse_fuzzer.png")
@@ -456,8 +730,8 @@ def main():
     print("[OK] blepulse_simulator.png")
 
     # Generate Animated Demo GIF using FFmpeg
-    print("Generating animated demo GIF (blepulse_demo.gif)...")
-    frames = [s1, s2, s3, s4, s5]
+    print("Generating comprehensive animated demo GIF (blepulse_demo.gif)...")
+    frames = [s1, s2, s3, s_fft, s_term, s_geiger, s_audit, s_macro, s_fota, s4, s5]
     frame_paths = []
     for i, f in enumerate(frames):
         p = os.path.join(IMG_DIR, f"temp_frame_{i}.png")
@@ -465,7 +739,6 @@ def main():
         frame_paths.append(p)
 
     gif_path = os.path.join(IMG_DIR, "blepulse_demo.gif")
-    # Build GIF with ffmpeg with 1.8 second delay per frame
     cmd = [
         "ffmpeg", "-y",
         "-framerate", "0.6",
@@ -483,21 +756,15 @@ def main():
     # Generate Logo strictly for README header
     logo = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
     ldraw = ImageDraw.Draw(logo)
-    # Squircle background
     ldraw.rounded_rectangle([(24, 24), (488, 488)], radius=110, fill=(11, 15, 25), outline=(0, 229, 255), width=8)
 
-    # Bluetooth rune + pulse wave stylized mark
-    # Draw pulse wave line
     wave = [
         (80, 256), (160, 256), (190, 210), (220, 310), (256, 120),
         (292, 380), (322, 230), (352, 280), (380, 256), (432, 256)
     ]
     ldraw.line(wave, fill=(0, 229, 255), width=10)
 
-    # Center Bluetooth B rune
-    # Vertical stem
     ldraw.line([(256, 140), (256, 372)], fill=(255, 255, 255), width=12)
-    # Cross arms
     ldraw.line([(200, 196), (312, 316)], fill=(255, 255, 255), width=12)
     ldraw.line([(200, 316), (312, 196)], fill=(255, 255, 255), width=12)
     ldraw.line([(312, 196), (256, 140)], fill=(255, 255, 255), width=12)

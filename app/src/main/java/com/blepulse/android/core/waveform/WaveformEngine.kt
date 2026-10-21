@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.UUID
 
 data class WaveformPoint(
     val timestampMs: Long,
@@ -26,14 +25,23 @@ data class ScopeChannel(
     val avgValue: Float = 0f
 )
 
+enum class ScopeViewMode(val label: String) {
+    TIME_DOMAIN("Time Domain (Oscilloscope)"),
+    FFT_SPECTRUM("Frequency Spectrum (FFT)")
+}
+
 data class ScopeState(
     val isPaused: Boolean = false,
+    val viewMode: ScopeViewMode = ScopeViewMode.TIME_DOMAIN,
     val timeWindowSeconds: Int = 10,
     val autoScaleY: Boolean = true,
     val manualYMin: Float = 0f,
     val manualYMax: Float = 100f,
     val channels: List<ScopeChannel> = emptyList(),
-    val sampleCount: Long = 0L
+    val sampleCount: Long = 0L,
+    val selectedFftChannelIndex: Int = 0,
+    val fftWindowType: FftWindowType = FftWindowType.HANNING,
+    val fftResult: FftResult? = null
 )
 
 enum class ScopeStreamFormat(val label: String) {
@@ -74,7 +82,31 @@ class WaveformEngine {
                 ScopeChannel("ch_1", "Channel 1", defaultColors[0])
             )
         }
-        _state.update { it.copy(channels = channels, sampleCount = 0L) }
+        _state.update {
+            it.copy(
+                channels = channels,
+                sampleCount = 0L,
+                fftResult = null
+            )
+        }
+    }
+
+    fun setViewMode(mode: ScopeViewMode) {
+        _state.update { it.copy(viewMode = mode) }
+    }
+
+    fun setFftChannel(index: Int) {
+        _state.update {
+            val updated = it.copy(selectedFftChannelIndex = index)
+            recalculateFft(updated)
+        }
+    }
+
+    fun setFftWindowType(window: FftWindowType) {
+        _state.update {
+            val updated = it.copy(fftWindowType = window)
+            recalculateFft(updated)
+        }
     }
 
     fun feedData(format: ScopeStreamFormat, bytes: ByteArray) {
@@ -101,11 +133,36 @@ class WaveformEngine {
                 )
             }
 
-            current.copy(
+            val updatedState = current.copy(
                 channels = updatedChannels,
                 sampleCount = current.sampleCount + 1
             )
+
+            // Recalculate FFT on the selected channel
+            recalculateFft(updatedState)
         }
+    }
+
+    private fun recalculateFft(state: ScopeState): ScopeState {
+        val targetCh = state.channels.getOrNull(state.selectedFftChannelIndex)
+            ?: state.channels.firstOrNull()
+
+        if (targetCh == null || targetCh.points.size < 8) {
+            return state.copy(fftResult = null)
+        }
+
+        val rawValues = targetCh.points.map { it.value }
+        val timestamps = targetCh.points.map { it.timestampMs }
+        val sampleRate = FftAnalyzer.estimateSampleRate(timestamps)
+
+        val fft = FftAnalyzer.computeFft(
+            signal = rawValues,
+            samplingRateHz = sampleRate,
+            windowType = state.fftWindowType,
+            maxN = 256
+        )
+
+        return state.copy(fftResult = fft)
     }
 
     private fun decodeValues(format: ScopeStreamFormat, bytes: ByteArray): List<Float> {
@@ -137,7 +194,6 @@ class WaveformEngine {
                     val z = bb.float
                     listOf(x, y, z)
                 } else if (bytes.size >= 6) {
-                    // 3 x Int16 format fallback
                     val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
                     listOf(bb.short.toFloat(), bb.short.toFloat(), bb.short.toFloat())
                 } else emptyList()
@@ -157,7 +213,8 @@ class WaveformEngine {
         _state.update { current ->
             current.copy(
                 channels = current.channels.map { it.copy(points = emptyList(), currentValue = 0f) },
-                sampleCount = 0L
+                sampleCount = 0L,
+                fftResult = null
             )
         }
     }
