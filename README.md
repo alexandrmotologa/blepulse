@@ -97,6 +97,11 @@ BLEPulse provides an open-source, native Android engineering suite built with Ko
 - Pre-configured profiles: Heart Rate Monitor (0x180D), Battery Service (0x180F), Nordic UART loopback echo, and Environmental Sensing (0x181A).
 - Central client monitor displaying peer MAC addresses, negotiated MTU, and incoming request logs.
 
+### 11. Adaptive Form-Factor & Tablet Navigation
+- Built with Jetpack Compose Material 3 responsive layout patterns (`BoxWithConstraints`).
+- Automatically transitions between a compact bottom `NavigationBar` on portrait smartphones and an ergonomic vertical `NavigationRail` on tablets, foldables, and landscape orientations (`maxWidth >= 600.dp`).
+- Multi-pane split layouts for FOTA flashing (firmware parameters on left, progress and transfer logs on right) and Geiger tracking (analog dial gauge on left, peripheral selector and feedback controls on right).
+
 ---
 
 ## Screenshots

@@ -8,10 +8,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,23 +21,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -61,7 +59,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blepulse.android.core.ble.BleRepository
+import com.blepulse.android.core.fota.FirmwareMetadata
+import com.blepulse.android.core.fota.FotaLogEntry
 import com.blepulse.android.core.fota.FotaManager
+import com.blepulse.android.core.fota.FotaProgress
 import com.blepulse.android.core.fota.FotaProtocol
 import com.blepulse.android.core.fota.FotaState
 import com.blepulse.android.ui.common.BleCard
@@ -117,14 +118,12 @@ fun FotaScreen(
         val bytes = ByteArray(totalBytes)
         when (selectedProtocol) {
             FotaProtocol.ESP32_BLE_OTA -> {
-                // ESP32 magic byte
                 bytes[0] = 0xE9.toByte()
                 bytes[1] = 0x03.toByte()
                 bytes[2] = 0x02.toByte()
                 bytes[3] = 0x20.toByte()
             }
             FotaProtocol.NORDIC_SECURE_DFU -> {
-                // PK zip header
                 bytes[0] = 0x50.toByte()
                 bytes[1] = 0x4B.toByte()
                 bytes[2] = 0x03.toByte()
@@ -154,48 +153,274 @@ fun FotaScreen(
         }
     }
 
-    Column(
+    val isFlashing = progress.state in listOf(
+        FotaState.VALIDATING,
+        FotaState.NEGOTIATING_MTU,
+        FotaState.PREPARING,
+        FotaState.FLASHING,
+        FotaState.VERIFYING
+    )
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(DarkSlateBg)
             .padding(16.dp)
     ) {
-        // Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
+        val isWideScreen = maxWidth >= 720.dp
+        val isCompactHeight = maxHeight < 620.dp
+
+        if (isWideScreen) {
+            // Adaptive 2-Column Layout for Tablets, Foldables & Landscape Desktops
+            Column(modifier = Modifier.fillMaxSize()) {
+                FotaHeader()
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Left Column: Parameters & Actions
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FotaProtocolSelector(
+                            selectedProtocol = selectedProtocol,
+                            onProtocolSelected = { selectedProtocol = it }
+                        )
+
+                        FotaFirmwareMetadataCard(
+                            firmwareMeta = firmwareMeta,
+                            loadedCustomFileBytes = loadedCustomFileBytes,
+                            loadedCustomFileName = loadedCustomFileName,
+                            selectedPresetSizeKb = selectedPresetSizeKb,
+                            onPickFile = { filePickerLauncher.launch("*/*") },
+                            onResetPreset = {
+                                loadedCustomFileBytes = null
+                                loadedCustomFileName = null
+                            },
+                            onPresetSelected = { selectedPresetSizeKb = it }
+                        )
+
+                        FotaTuningSliders(
+                            chunkSize = chunkSize,
+                            onChunkSizeChange = { chunkSize = it },
+                            interChunkDelayMs = interChunkDelayMs,
+                            onDelayChange = { interChunkDelayMs = it }
+                        )
+
+                        FotaActionButtons(
+                            isFlashing = isFlashing,
+                            hasActiveConnection = repository.activeConnection.value != null,
+                            onStartFlash = {
+                                val activeConn = repository.activeConnection.value
+                                if (activeConn != null) {
+                                    fotaManager.startFota(
+                                        connection = activeConn,
+                                        firmwareBytes = currentFirmwareBytes,
+                                        protocol = selectedProtocol,
+                                        chunkSize = chunkSize.toInt(),
+                                        interChunkDelayMs = interChunkDelayMs.toLong()
+                                    )
+                                }
+                            },
+                            onAbort = { fotaManager.cancelFota() }
+                        )
+                    }
+
+                    // Right Column: Progress Card & Monospace Logs
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FotaProgressCard(progress = progress)
+
+                        FotaConsoleLogs(
+                            logs = logs,
+                            logListState = logListState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
+                    }
+                }
+            }
+        } else if (isCompactHeight) {
+            // Adaptive Scrollable Single Column for Compact Height / Landscape Phones
+            Column(
                 modifier = Modifier
-                    .size(40.dp)
-                    .background(BleViolet.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.CloudUpload,
-                    contentDescription = null,
-                    tint = BleViolet
+                FotaHeader()
+
+                FotaProtocolSelector(
+                    selectedProtocol = selectedProtocol,
+                    onProtocolSelected = { selectedProtocol = it }
+                )
+
+                FotaFirmwareMetadataCard(
+                    firmwareMeta = firmwareMeta,
+                    loadedCustomFileBytes = loadedCustomFileBytes,
+                    loadedCustomFileName = loadedCustomFileName,
+                    selectedPresetSizeKb = selectedPresetSizeKb,
+                    onPickFile = { filePickerLauncher.launch("*/*") },
+                    onResetPreset = {
+                        loadedCustomFileBytes = null
+                        loadedCustomFileName = null
+                    },
+                    onPresetSelected = { selectedPresetSizeKb = it }
+                )
+
+                FotaTuningSliders(
+                    chunkSize = chunkSize,
+                    onChunkSizeChange = { chunkSize = it },
+                    interChunkDelayMs = interChunkDelayMs,
+                    onDelayChange = { interChunkDelayMs = it }
+                )
+
+                FotaProgressCard(progress = progress)
+
+                FotaActionButtons(
+                    isFlashing = isFlashing,
+                    hasActiveConnection = repository.activeConnection.value != null,
+                    onStartFlash = {
+                        val activeConn = repository.activeConnection.value
+                        if (activeConn != null) {
+                            fotaManager.startFota(
+                                connection = activeConn,
+                                firmwareBytes = currentFirmwareBytes,
+                                protocol = selectedProtocol,
+                                chunkSize = chunkSize.toInt(),
+                                interChunkDelayMs = interChunkDelayMs.toLong()
+                            )
+                        }
+                    },
+                    onAbort = { fotaManager.cancelFota() }
+                )
+
+                FotaConsoleLogs(
+                    logs = logs,
+                    logListState = logListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(260.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = "FOTA Firmware Flasher",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+        } else {
+            // Standard Portrait Phone Layout
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                FotaHeader()
+
+                FotaProtocolSelector(
+                    selectedProtocol = selectedProtocol,
+                    onProtocolSelected = { selectedProtocol = it }
                 )
-                Text(
-                    text = "Nordic DFU & ESP-IDF Over-The-Air Flashing",
-                    fontSize = 12.sp,
-                    color = TextMuted
+
+                FotaFirmwareMetadataCard(
+                    firmwareMeta = firmwareMeta,
+                    loadedCustomFileBytes = loadedCustomFileBytes,
+                    loadedCustomFileName = loadedCustomFileName,
+                    selectedPresetSizeKb = selectedPresetSizeKb,
+                    onPickFile = { filePickerLauncher.launch("*/*") },
+                    onResetPreset = {
+                        loadedCustomFileBytes = null
+                        loadedCustomFileName = null
+                    },
+                    onPresetSelected = { selectedPresetSizeKb = it }
+                )
+
+                FotaTuningSliders(
+                    chunkSize = chunkSize,
+                    onChunkSizeChange = { chunkSize = it },
+                    interChunkDelayMs = interChunkDelayMs,
+                    onDelayChange = { interChunkDelayMs = it }
+                )
+
+                FotaProgressCard(progress = progress)
+
+                FotaActionButtons(
+                    isFlashing = isFlashing,
+                    hasActiveConnection = repository.activeConnection.value != null,
+                    onStartFlash = {
+                        val activeConn = repository.activeConnection.value
+                        if (activeConn != null) {
+                            fotaManager.startFota(
+                                connection = activeConn,
+                                firmwareBytes = currentFirmwareBytes,
+                                protocol = selectedProtocol,
+                                chunkSize = chunkSize.toInt(),
+                                interChunkDelayMs = interChunkDelayMs.toLong()
+                            )
+                        }
+                    },
+                    onAbort = { fotaManager.cancelFota() }
+                )
+
+                FotaConsoleLogs(
+                    logs = logs,
+                    logListState = logListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 )
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(14.dp))
+@Composable
+private fun FotaHeader() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(BleViolet.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.CloudUpload,
+                contentDescription = null,
+                tint = BleViolet
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = "FOTA Firmware Flasher",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = "Nordic DFU & ESP-IDF Over-The-Air Flashing",
+                fontSize = 12.sp,
+                color = TextMuted
+            )
+        }
+    }
+}
 
-        // Protocol Selector
+@Composable
+private fun FotaProtocolSelector(
+    selectedProtocol: FotaProtocol,
+    onProtocolSelected: (FotaProtocol) -> Unit
+) {
+    Column {
         Text(
             text = "TARGET PROTOCOL",
             fontSize = 11.sp,
@@ -210,7 +435,7 @@ fun FotaScreen(
             FotaProtocol.entries.forEach { proto ->
                 FilterChip(
                     selected = selectedProtocol == proto,
-                    onClick = { selectedProtocol = proto },
+                    onClick = { onProtocolSelected(proto) },
                     label = { Text(proto.displayName, fontSize = 11.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = BleCyan.copy(alpha = 0.2f),
@@ -222,257 +447,255 @@ fun FotaScreen(
                 )
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Firmware Metadata Card
-        BleCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = firmwareMeta.fileName,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "${firmwareMeta.fileSizeBytes / 1024} KB",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BleGreen
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
+@Composable
+private fun FotaFirmwareMetadataCard(
+    firmwareMeta: FirmwareMetadata,
+    loadedCustomFileBytes: ByteArray?,
+    loadedCustomFileName: String?,
+    selectedPresetSizeKb: Int,
+    onPickFile: () -> Unit,
+    onResetPreset: () -> Unit,
+    onPresetSelected: (Int) -> Unit
+) {
+    BleCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = firmwareMeta.detectedType,
-                    fontSize = 11.sp,
-                    color = BleViolet
+                    text = firmwareMeta.fileName,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
                 )
+                Text(
+                    text = "${firmwareMeta.fileSizeBytes / 1024} KB",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BleGreen
+                )
+            }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("CRC32 CHECKSUM", fontSize = 9.sp, color = TextMuted)
-                        Text(
-                            "0x${"%08X".format(firmwareMeta.crc32Checksum)}",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = TextSecondary
-                        )
-                    }
-                    Column {
-                        Text("HEADER MAGIC", fontSize = 9.sp, color = TextMuted)
-                        Text(
-                            firmwareMeta.magicHeaderHex,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = TextSecondary
-                        )
-                    }
-                    Column {
-                        Text("EST. TIME", fontSize = 9.sp, color = TextMuted)
-                        Text("~${firmwareMeta.estimatedDurationSec}s", fontSize = 11.sp, color = BleOrange)
-                    }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = firmwareMeta.detectedType,
+                fontSize = 11.sp,
+                color = BleViolet
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("CRC32 CHECKSUM", fontSize = 9.sp, color = TextMuted)
+                    Text(
+                        "0x${"%08X".format(firmwareMeta.crc32Checksum)}",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = TextSecondary
+                    )
+                }
+                Column {
+                    Text("HEADER MAGIC", fontSize = 9.sp, color = TextMuted)
+                    Text(
+                        firmwareMeta.magicHeaderHex,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = TextSecondary
+                    )
+                }
+                Column {
+                    Text("EST. TIME", fontSize = 9.sp, color = TextMuted)
+                    Text("~${firmwareMeta.estimatedDurationSec}s", fontSize = 11.sp, color = BleOrange)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            // File Picker / Reset Preset Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onPickFile,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkCard),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = BleCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (loadedCustomFileBytes != null) "Change File (${loadedCustomFileName?.take(16)}...)" else "Pick Firmware (.bin / .zip)",
+                        fontSize = 11.sp,
+                        color = BleCyan
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                // File Picker / Preset Row
+                if (loadedCustomFileBytes != null) {
+                    Text(
+                        text = "Reset Preset",
+                        fontSize = 10.sp,
+                        color = BleOrange,
+                        modifier = Modifier.clickable { onResetPreset() }
+                    )
+                }
+            }
+
+            if (loadedCustomFileBytes == null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                // Sample image size selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Button(
-                        onClick = { filePickerLauncher.launch("*/*") },
-                        colors = ButtonDefaults.buttonColors(containerColor = DarkCard),
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = BleCyan, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            if (loadedCustomFileBytes != null) "Change File (${loadedCustomFileName?.take(16)}...)" else "Pick Firmware (.bin / .zip)",
-                            fontSize = 11.sp,
-                            color = BleCyan
-                        )
-                    }
-
-                    if (loadedCustomFileBytes != null) {
-                        Text(
-                            text = "Reset Preset",
-                            fontSize = 10.sp,
-                            color = BleOrange,
-                            modifier = Modifier.clickable {
-                                loadedCustomFileBytes = null
-                                loadedCustomFileName = null
-                            }
-                        )
-                    }
-                }
-
-                if (loadedCustomFileBytes == null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Sample image size selector
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Sample Preset:", fontSize = 10.sp, color = TextMuted)
-                        listOf(16, 32, 64, 128).forEach { kb ->
-                            FilterChip(
-                                selected = selectedPresetSizeKb == kb,
-                                onClick = { selectedPresetSizeKb = kb },
-                                label = { Text("${kb}KB", fontSize = 10.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = BleViolet.copy(alpha = 0.25f),
-                                    selectedLabelColor = BleViolet,
-                                    containerColor = DarkCard,
-                                    labelColor = TextMuted
-                                )
+                    Text("Sample Preset:", fontSize = 10.sp, color = TextMuted)
+                    listOf(16, 32, 64, 128).forEach { kb ->
+                        FilterChip(
+                            selected = selectedPresetSizeKb == kb,
+                            onClick = { onPresetSelected(kb) },
+                            label = { Text("${kb}KB", fontSize = 10.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = BleViolet.copy(alpha = 0.25f),
+                                selectedLabelColor = BleViolet,
+                                containerColor = DarkCard,
+                                labelColor = TextMuted
                             )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Chunk & Delay Tuning
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Chunk Size: ${chunkSize.toInt()} B",
-                    fontSize = 11.sp,
-                    color = TextSecondary
-                )
-                Slider(
-                    value = chunkSize,
-                    onValueChange = { chunkSize = it },
-                    valueRange = 20f..498f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = BleCyan,
-                        activeTrackColor = BleCyan,
-                        inactiveTrackColor = DarkSurface
-                    )
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Interval Delay: ${interChunkDelayMs.toInt()} ms",
-                    fontSize = 11.sp,
-                    color = TextSecondary
-                )
-                Slider(
-                    value = interChunkDelayMs,
-                    onValueChange = { interChunkDelayMs = it },
-                    valueRange = 0f..25f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = BleOrange,
-                        activeTrackColor = BleOrange,
-                        inactiveTrackColor = DarkSurface
-                    )
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Progress Section
-        BleCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StateBadge(progress.state)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = progress.statusMessage,
-                            fontSize = 11.sp,
-                            color = TextSecondary,
-                            maxLines = 1
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FotaTuningSliders(
+    chunkSize: Float,
+    onChunkSizeChange: (Float) -> Unit,
+    interChunkDelayMs: Float,
+    onDelayChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Chunk Size: ${chunkSize.toInt()} B",
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+            Slider(
+                value = chunkSize,
+                onValueChange = onChunkSizeChange,
+                valueRange = 20f..498f,
+                colors = SliderDefaults.colors(
+                    thumbColor = BleCyan,
+                    activeTrackColor = BleCyan,
+                    inactiveTrackColor = DarkSurface
+                )
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Interval Delay: ${interChunkDelayMs.toInt()} ms",
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+            Slider(
+                value = interChunkDelayMs,
+                onValueChange = onDelayChange,
+                valueRange = 0f..25f,
+                colors = SliderDefaults.colors(
+                    thumbColor = BleOrange,
+                    activeTrackColor = BleOrange,
+                    inactiveTrackColor = DarkSurface
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun FotaProgressCard(progress: FotaProgress) {
+    BleCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StateBadge(progress.state)
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${(progress.percent * 100).toInt()}%",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = when (progress.state) {
-                            FotaState.COMPLETED -> BleGreen
-                            FotaState.FAILED, FotaState.ABORTED -> BleRed
-                            else -> BleCyan
-                        }
+                        text = progress.statusMessage,
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        maxLines = 1
                     )
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { progress.percent },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp),
+                Text(
+                    text = "${(progress.percent * 100).toInt()}%",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
                     color = when (progress.state) {
                         FotaState.COMPLETED -> BleGreen
-                        FotaState.FAILED -> BleRed
+                        FotaState.FAILED, FotaState.ABORTED -> BleRed
                         else -> BleCyan
-                    },
-                    trackColor = DarkSurface
+                    }
                 )
+            }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    MetricPill("Speed", "${"%.1f".format(progress.transferRateKbps)} kbps")
-                    MetricPill("Bytes", "${progress.bytesSent} / ${progress.totalBytes}")
-                    MetricPill("Chunks", "${progress.currentChunk} / ${progress.totalChunks}")
-                    MetricPill("ETA", "${progress.estimatedRemainingSeconds}s")
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { progress.percent },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+                color = when (progress.state) {
+                    FotaState.COMPLETED -> BleGreen
+                    FotaState.FAILED -> BleRed
+                    else -> BleCyan
+                },
+                trackColor = DarkSurface
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                MetricPill("Speed", "${"%.1f".format(progress.transferRateKbps)} kbps")
+                MetricPill("Bytes", "${progress.bytesSent} / ${progress.totalBytes}")
+                MetricPill("Chunks", "${progress.currentChunk} / ${progress.totalChunks}")
+                MetricPill("ETA", "${progress.estimatedRemainingSeconds}s")
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Action Buttons
-        val isFlashing = progress.state in listOf(
-            FotaState.VALIDATING,
-            FotaState.NEGOTIATING_MTU,
-            FotaState.PREPARING,
-            FotaState.FLASHING,
-            FotaState.VERIFYING
-        )
-
+@Composable
+private fun FotaActionButtons(
+    isFlashing: Boolean,
+    hasActiveConnection: Boolean,
+    onStartFlash: () -> Unit,
+    onAbort: () -> Unit
+) {
+    Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Button(
-                onClick = {
-                    val activeConn = repository.activeConnection.value
-                    if (activeConn != null) {
-                        fotaManager.startFota(
-                            connection = activeConn,
-                            firmwareBytes = currentFirmwareBytes,
-                            protocol = selectedProtocol,
-                            chunkSize = chunkSize.toInt(),
-                            interChunkDelayMs = interChunkDelayMs.toLong()
-                        )
-                    }
-                },
-                enabled = !isFlashing && repository.activeConnection.value != null,
+                onClick = onStartFlash,
+                enabled = !isFlashing && hasActiveConnection,
                 colors = ButtonDefaults.buttonColors(containerColor = BleCyan),
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)
@@ -484,7 +707,7 @@ fun FotaScreen(
 
             if (isFlashing) {
                 Button(
-                    onClick = { fotaManager.cancelFota() },
+                    onClick = onAbort,
                     colors = ButtonDefaults.buttonColors(containerColor = BleRed),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -495,7 +718,7 @@ fun FotaScreen(
             }
         }
 
-        if (repository.activeConnection.value == null) {
+        if (!hasActiveConnection) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Notice: Connect to a target BLE peripheral in Scanner/Explorer before flashing.",
@@ -503,10 +726,16 @@ fun FotaScreen(
                 color = BleOrange
             )
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Monospace Console Logs
+@Composable
+private fun FotaConsoleLogs(
+    logs: List<FotaLogEntry>,
+    logListState: LazyListState,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
         Text(
             text = "FOTA TRANSFER LOGS (${logs.size})",
             fontSize = 11.sp,
@@ -518,7 +747,7 @@ fun FotaScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(1f, fill = true)
                 .background(DarkSurface, RoundedCornerShape(8.dp))
                 .border(1.dp, Color(0xFF263238), RoundedCornerShape(8.dp))
                 .padding(8.dp)
